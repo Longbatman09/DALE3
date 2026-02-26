@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">DALE</string>
+    <string name="welcome_activity_title">Welcome to DALE</string>
+    <string name="setup_activity_title">Setup DALE</string>
+    <string name="app_selection_activity_title">Select Apps</string>
+    <string name="lock_setup_activity_title">Setup Lock</string>
+</resources>
