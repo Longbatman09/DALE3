@@ -1,17 +1,28 @@
 package com.example.dale
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,6 +55,13 @@ class LockScreenSetupActivity : ComponentActivity() {
             }
         }
     }
+
+    fun proceedToPasswordSetup(groupId: String) {
+        val intent = Intent(this, PasswordSetupActivity::class.java)
+        intent.putExtra("groupId", groupId)
+        startActivity(intent)
+        finish()
+    }
 }
 
 @Composable
@@ -62,42 +80,79 @@ fun LockScreenSetupScreen(
                         Color(0xFF16213e)
                     )
                 )
-            ),
-        contentAlignment = Alignment.Center
+            )
     ) {
         Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                text = "Step 2: Lock Screen Setup",
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF9575CD),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(bottom = 24.dp)
-            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // Header with back button
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 24.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = { (activity as? LockScreenSetupActivity)?.finish() },
+                        modifier = Modifier.weight(0.1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White
+                        )
+                    }
+                    Text(
+                        text = "Step 2: Lock Setup",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF9575CD),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(0.9f)
+                    )
+                }
 
-            Text(
-                text = "Group ID: $groupId",
-                fontSize = 14.sp,
-                color = Color(0xFFB0B0B0),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(bottom = 32.dp)
-            )
+                Text(
+                    text = "Ensure your dual app has been created successfully before proceeding",
+                    fontSize = 14.sp,
+                    color = Color(0xFFB0B0B0),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(bottom = 32.dp)
+                )
 
+                Text(
+                    text = "Group ID: $groupId",
+                    fontSize = 12.sp,
+                    color = Color(0xFF9575CD),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(bottom = 32.dp)
+                )
+            }
+
+            // Next Step Button
             Button(
                 onClick = {
-                    // TODO: Implement lock screen setup
+                    (activity as? LockScreenSetupActivity)?.proceedToPasswordSetup(groupId)
                 },
-                modifier = Modifier.padding(16.dp),
-                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Purple40
                 )
             ) {
                 Text(
-                    text = "Coming Soon: Set Lock Pattern/PIN",
+                    text = "Setup Lock Screen",
                     color = Color.White,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold

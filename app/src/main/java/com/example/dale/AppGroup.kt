@@ -8,7 +8,7 @@ data class AppGroup(
     val app2PackageName: String = "",
     val app2Name: String = "",
     val isLocked: Boolean = false,
-    val lockPin: String = "",
+    val app1LockPin: String = "",
+    val app2LockPin: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )
-

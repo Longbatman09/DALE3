@@ -44,6 +44,11 @@
             android:exported="false"
             android:label="@string/lock_setup_activity_title"
             android:theme="@style/Theme.DALE" />
+        <activity
+            android:name=".PasswordSetupActivity"
+            android:exported="false"
+            android:label="@string/password_setup_activity_title"
+            android:theme="@style/Theme.DALE" />
     </application>
 
 </manifest>
