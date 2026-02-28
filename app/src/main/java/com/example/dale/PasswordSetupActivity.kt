@@ -6,6 +6,10 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -59,11 +63,14 @@ import androidx.compose.material3.OutlinedTextField
 import kotlinx.coroutines.delay
 
 class PasswordSetupActivity : ComponentActivity() {
+    private var groupId: String = ""
+    private var overlayPermissionRequested = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val groupId = intent.getStringExtra("groupId") ?: ""
+        groupId = intent.getStringExtra("groupId") ?: ""
         // directly query overlay permission (project minSdk >= M)
         val overlayAllowed = Settings.canDrawOverlays(this)
 
@@ -78,6 +85,26 @@ class PasswordSetupActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+
+        // Monitor overlay permission status changes
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                if (overlayPermissionRequested && Settings.canDrawOverlays(this@PasswordSetupActivity)) {
+                    // Permission was granted after returning from settings
+                    completePasswordSetup(groupId)
+                    overlayPermissionRequested = false
+                }
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Check if permission was granted after returning from settings
+        if (overlayPermissionRequested && Settings.canDrawOverlays(this)) {
+            completePasswordSetup(groupId)
+            overlayPermissionRequested = false
         }
     }
 
@@ -99,13 +126,14 @@ class PasswordSetupActivity : ComponentActivity() {
     fun proceedToOverlayPermission(groupId: String) {
         // Request overlay permission if not already granted
         if (!Settings.canDrawOverlays(this)) {
+            overlayPermissionRequested = true
             val intent = Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 "package:$packageName".toUri()
             )
             startActivity(intent)
         } else {
-            // Permission already granted, complete setup
+            // Permission already granted, complete setup immediately
             completePasswordSetup(groupId)
         }
     }
