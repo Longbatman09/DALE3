@@ -1,7 +1,6 @@
 package com.example.dale
 
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -23,7 +22,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -31,26 +29,34 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.*
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.net.toUri
 import com.example.dale.ui.theme.DALETheme
 import com.example.dale.ui.theme.Purple40
 import com.example.dale.utils.SharedPreferencesManager
 import java.security.MessageDigest
+import androidx.compose.material3.OutlinedTextField
+import kotlinx.coroutines.delay
 
 class PasswordSetupActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,9 +64,8 @@ class PasswordSetupActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val groupId = intent.getStringExtra("groupId") ?: ""
-        val overlayAllowed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Settings.canDrawOverlays(this)
-        } else true
+        // directly query overlay permission (project minSdk >= M)
+        val overlayAllowed = Settings.canDrawOverlays(this)
 
         setContent {
             DALETheme {
@@ -83,8 +88,8 @@ class PasswordSetupActivity : ComponentActivity() {
         if (appGroup != null) {
             val hashedPin = hashPin(pin)
             val newGroup = when (appIndex) {
-                1 -> appGroup.copy(app1LockPin = hashedPin, isLocked = appGroup.isLocked || true)
-                2 -> appGroup.copy(app2LockPin = hashedPin, isLocked = appGroup.isLocked || true)
+                1 -> appGroup.copy(app1LockPin = hashedPin, isLocked = true)
+                2 -> appGroup.copy(app2LockPin = hashedPin, isLocked = true)
                 else -> appGroup
             }
             sharedPrefsManager.saveAppGroup(newGroup)
@@ -92,23 +97,25 @@ class PasswordSetupActivity : ComponentActivity() {
     }
 
     fun proceedToOverlayPermission(groupId: String) {
-        // Check if overlay permission is granted
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (!Settings.canDrawOverlays(this)) {
-                // Request overlay permission
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    android.net.Uri.parse("package:$packageName")
-                )
-                startActivity(intent)
-            } else {
-                // Permission already granted, complete setup
-                completePasswordSetup(groupId)
-            }
+        // Request overlay permission if not already granted
+        if (!Settings.canDrawOverlays(this)) {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                "package:$packageName".toUri()
+            )
+            startActivity(intent)
         } else {
-            // For older Android versions, permission is automatically granted
+            // Permission already granted, complete setup
             completePasswordSetup(groupId)
         }
+    }
+
+    fun openAppInfo() {
+        val intent = Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            "package:$packageName".toUri()
+        )
+        startActivity(intent)
     }
 
     fun completePasswordSetup(groupId: String) {
@@ -150,12 +157,15 @@ fun PasswordSetupScreen(
     val showOverlayDialog = remember { mutableStateOf(false) }
     val overlayAllowed = remember { mutableStateOf(overlayAllowedInitial) }
 
+    // resetKey forces PinEntryScreen recomposition when changed
+    val resetKey = remember { mutableStateOf(0) }
+
     // Load app names for UI
     val app1Name = remember { mutableStateOf("App 1") }
     val app2Name = remember { mutableStateOf("App 2") }
 
     // Load actual names from SharedPreferences
-    val sharedPrefs = SharedPreferencesManager.getInstance((activity as? ComponentActivity)!!)
+    val sharedPrefs = SharedPreferencesManager.getInstance(activity as ComponentActivity)
     val appGroup = remember { mutableStateOf(sharedPrefs.getAppGroup(groupId)) }
     appGroup.value?.let { group ->
         if (group.app1Name.isNotEmpty()) app1Name.value = group.app1Name
@@ -201,7 +211,7 @@ fun PasswordSetupScreen(
                 }
                 Text(
                     text = "Lock Authentication",
-                    fontSize = 24.sp,
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF9575CD),
                     textAlign = TextAlign.Center,
@@ -212,10 +222,10 @@ fun PasswordSetupScreen(
             // Info text
             Text(
                 text = "Choose your authentication method to secure your dual apps",
-                fontSize = 14.sp,
+                fontSize = 13.sp,
                 color = Color(0xFFB0B0B0),
                 textAlign = TextAlign.Center,
-                modifier = Modifier.padding(bottom = 24.dp)
+                modifier = Modifier.padding(bottom = 16.dp)
             )
 
             // When not chosen auth type yet, show selection
@@ -228,34 +238,37 @@ fun PasswordSetupScreen(
             } else {
                 // Show Pin entry for the current target app
                 val appName = if (targetAppIndex.value == 1) app1Name.value else app2Name.value
-                PinEntryScreen(
-                    authType = selectedAuthType.value ?: "PIN",
-                    groupId = groupId,
-                    activity = activity,
-                    forAppName = appName,
-                    onPinConfirmed = { pin ->
-                        // Save pin for app
-                        (activity as? PasswordSetupActivity)?.savePinForApp(groupId, targetAppIndex.value, pin)
-                        if (targetAppIndex.value == 1) {
-                            // move to set PIN for app 2
-                            targetAppIndex.value = 2
-                            // reset internal PinEntryScreen state by toggling selectedAuthType
-                            selectedAuthType.value = null
-                            selectedAuthType.value = "PIN"
-                        } else {
-                            // both pins set -> show overlay permission dialog if needed
-                            if (!overlayAllowed.value) {
-                                showOverlayDialog.value = true
+                // Use key with resetKey and target index to force a fresh PinEntryScreen when switching
+                key(resetKey.value, targetAppIndex.value) {
+                    PinEntryScreen(
+                        authType = selectedAuthType.value ?: "PIN",
+                        forAppName = appName,
+                        onPinConfirmed = { pin ->
+                            // Save pin for app
+                            (activity as? PasswordSetupActivity)?.savePinForApp(groupId, targetAppIndex.value, pin)
+                            if (targetAppIndex.value == 1) {
+                                // move to set PIN for app 2 without toggling selection (avoid glitch)
+                                targetAppIndex.value = 2
+                                // bump resetKey to force recollection of PinEntryScreen internal remembers
+                                resetKey.value = resetKey.value + 1
+                                // ensure selectedAuthType stays PIN so the flow continues
+                                selectedAuthType.value = "PIN"
                             } else {
-                                (activity as? PasswordSetupActivity)?.proceedToOverlayPermission(groupId)
+                                // both pins set -> show overlay permission dialog if needed
+                                if (!overlayAllowed.value) {
+                                    showOverlayDialog.value = true
+                                } else {
+                                    (activity as? PasswordSetupActivity)?.proceedToOverlayPermission(groupId)
+                                }
                             }
+                        },
+                        onBackToSelection = {
+                            // go back to auth selection
+                            selectedAuthType.value = null
+                            targetAppIndex.value = 1
                         }
-                    },
-                    onBackToSelection = {
-                        // go back to auth selection
-                        selectedAuthType.value = null
-                    }
-                )
+                    )
+                }
             }
         }
 
@@ -269,7 +282,7 @@ fun PasswordSetupScreen(
                 text = {
                     Text(
                         "DALE needs the 'Display over other apps' permission so it can show the lock screen overlay.\n\n" +
-                                "We will open the system settings where you can grant the permission to DALE."
+                                "We will open the system settings where you can grant the permission to DALE. If DALE is not visible in the special access list, you can open the app info page and search for special access or permissions."
                     )
                 },
                 confirmButton = {
@@ -277,16 +290,26 @@ fun PasswordSetupScreen(
                         showOverlayDialog.value = false
                         (activity as? PasswordSetupActivity)?.proceedToOverlayPermission(groupId)
                     }) {
-                        Text("Open Settings")
+                        Text("Open Overlay Settings")
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = {
-                        showOverlayDialog.value = false
-                        // user cancelled; still mark setup complete (pins saved)
-                        (activity as? PasswordSetupActivity)?.completePasswordSetup(groupId)
-                    }) {
-                        Text("Skip")
+                    Row {
+                        TextButton(onClick = {
+                            showOverlayDialog.value = false
+                            // open App Info to help user locate the permission if overlay list hides DALE
+                            (activity as? PasswordSetupActivity)?.openAppInfo()
+                        }) {
+                            Text("Open App Info")
+                        }
+
+                        TextButton(onClick = {
+                            showOverlayDialog.value = false
+                            // user cancelled; still mark setup complete (pins saved)
+                            (activity as? PasswordSetupActivity)?.completePasswordSetup(groupId)
+                        }) {
+                            Text("Skip")
+                        }
                     }
                 }
             )
@@ -301,20 +324,20 @@ fun AuthenticationTypeSelection(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         val authTypes = listOf(
-            AuthType("PIN", "4-6 digit PIN", "🔐"),
-            AuthType("PASSWORD", "Alphanumeric password", "🔒"),
-            AuthType("PATTERN", "Draw a pattern", "✏️"),
-            AuthType("BIOMETRICS", "Fingerprint/Face ID", "👆")
+            AuthType("PIN", "4-6 digit PIN", "🔐", enabled = true),
+            AuthType("PASSWORD", "Alphanumeric password", "🔒", enabled = false),
+            AuthType("PATTERN", "Draw a pattern", "✏️", enabled = false),
+            AuthType("BIOMETRICS", "Fingerprint/Face ID", "👆", enabled = false)
         )
 
         authTypes.forEach { authType ->
             AuthenticationTypeCard(
                 authType = authType,
-                onSelected = { onAuthTypeSelected(authType.name) }
+                onSelected = { if (authType.enabled) onAuthTypeSelected(authType.name) }
             )
         }
     }
@@ -323,7 +346,8 @@ fun AuthenticationTypeSelection(
 data class AuthType(
     val name: String,
     val description: String,
-    val icon: String
+    val icon: String,
+    val enabled: Boolean = true
 )
 
 @Composable
@@ -334,9 +358,11 @@ fun AuthenticationTypeCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(elevation = 8.dp, shape = RoundedCornerShape(12.dp))
-            .clickable { onSelected() },
-        shape = RoundedCornerShape(12.dp),
+            .height(68.dp)
+            .shadow(elevation = 4.dp, shape = RoundedCornerShape(8.dp))
+            .then(if (authType.enabled) Modifier.clickable { onSelected() } else Modifier)
+            .alpha(if (authType.enabled) 1f else 0.45f),
+        shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(
             containerColor = Color(0xFF2a2a3e)
         )
@@ -344,7 +370,7 @@ fun AuthenticationTypeCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(vertical = 8.dp, horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -353,21 +379,21 @@ fun AuthenticationTypeCard(
             ) {
                 Text(
                     text = authType.name,
-                    fontSize = 18.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF9575CD)
                 )
                 Text(
                     text = authType.description,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = Color(0xFFB0B0B0),
                     modifier = Modifier.padding(top = 4.dp)
                 )
             }
             Text(
                 text = authType.icon,
-                fontSize = 32.sp,
-                modifier = Modifier.padding(start = 16.dp)
+                fontSize = 22.sp,
+                modifier = Modifier.padding(start = 12.dp)
             )
         }
     }
@@ -376,8 +402,6 @@ fun AuthenticationTypeCard(
 @Composable
 fun PinEntryScreen(
     authType: String = "PIN",
-    groupId: String = "",
-    activity: ComponentActivity? = null,
     forAppName: String = "App",
     onPinConfirmed: (String) -> Unit = {},
     onBackToSelection: () -> Unit = {}
@@ -387,6 +411,9 @@ fun PinEntryScreen(
     val step = remember { mutableStateOf(0) } // 0: Enter PIN, 1: Confirm PIN
     val errorMessage = remember { mutableStateOf("") }
 
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -395,7 +422,7 @@ fun PinEntryScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 16.dp),
+                .padding(bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = { onBackToSelection() }) {
@@ -410,11 +437,11 @@ fun PinEntryScreen(
         // Step indicator
         Text(
             text = if (step.value == 0) "Enter PIN for $forAppName" else "Confirm PIN for $forAppName",
-            fontSize = 20.sp,
+            fontSize = 18.sp,
             fontWeight = FontWeight.Bold,
             color = Color(0xFF9575CD),
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(bottom = 8.dp)
+            modifier = Modifier.padding(bottom = 6.dp)
         )
 
         // Step counter
@@ -422,13 +449,13 @@ fun PinEntryScreen(
             text = "Step ${step.value + 1} of 2",
             fontSize = 12.sp,
             color = Color(0xFFB0B0B0),
-            modifier = Modifier.padding(bottom = 32.dp)
+            modifier = Modifier.padding(bottom = 18.dp)
         )
 
         // PIN Display
         PinDisplayBox(
             pin = if (step.value == 0) pinInput.value else pinConfirm.value,
-            modifier = Modifier.padding(bottom = 32.dp)
+            modifier = Modifier.padding(bottom = 18.dp)
         )
 
         // Error message
@@ -438,42 +465,37 @@ fun PinEntryScreen(
                 fontSize = 12.sp,
                 color = Color(0xFFFF6B6B),
                 textAlign = TextAlign.Center,
-                modifier = Modifier.padding(bottom = 16.dp)
+                modifier = Modifier.padding(bottom = 12.dp)
             )
         }
 
-        // Number Keyboard
-        NumberKeyboard(
-            onNumberClick = { number ->
-                val currentPin = if (step.value == 0) pinInput.value else pinConfirm.value
-                if (currentPin.length < 6) {
-                    if (step.value == 0) {
-                        pinInput.value = currentPin + number
-                    } else {
-                        pinConfirm.value = currentPin + number
-                    }
-                    errorMessage.value = ""
-                }
+        // Use system numeric keyboard via an OutlinedTextField (hidden text)
+        val currentPinState = if (step.value == 0) pinInput else pinConfirm
+
+        OutlinedTextField(
+            value = currentPinState.value,
+            onValueChange = { value ->
+                // allow only digits and limit to 6
+                val filtered = value.filter { it.isDigit() }.take(6)
+                currentPinState.value = filtered
+                // auto-advance to confirm if user typed required length (optional)
+                // (no-op: we wait for the user to press Next)
             },
-            onBackspace = {
-                if (step.value == 0) {
-                    if (pinInput.value.isNotEmpty()) {
-                        pinInput.value = pinInput.value.dropLast(1)
-                    }
-                } else {
-                    if (pinConfirm.value.isNotEmpty()) {
-                        pinConfirm.value = pinConfirm.value.dropLast(1)
-                    }
-                }
-            },
-            onClear = {
-                if (step.value == 0) {
-                    pinInput.value = ""
-                } else {
-                    pinConfirm.value = ""
-                }
-            }
+            visualTransformation = PasswordVisualTransformation(),
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .focusRequester(focusRequester)
+                .alpha(0f) // hide the actual field visually; we use the dot display above
         )
+
+        // ensure keyboard opens when screen appears
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            delay(150)
+            focusRequester.requestFocus()
+            keyboardController?.show()
+        }
 
         // Continue Button
         Button(
@@ -510,7 +532,7 @@ fun PinEntryScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .padding(top = 24.dp),
+                .padding(top = 16.dp),
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = Purple40
@@ -534,7 +556,7 @@ fun PinDisplayBox(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .height(80.dp)
+            .height(72.dp)
             .shadow(elevation = 8.dp, shape = RoundedCornerShape(12.dp)),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
@@ -544,11 +566,11 @@ fun PinDisplayBox(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .padding(12.dp),
             contentAlignment = Alignment.Center
         ) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 repeat(6) { index ->
@@ -563,114 +585,10 @@ fun PinDisplayBox(
 fun PinDot(isFilled: Boolean) {
     Box(
         modifier = Modifier
-            .size(16.dp)
+            .size(14.dp)
             .background(
                 color = if (isFilled) Color(0xFF9575CD) else Color(0xFF4a4a5e),
                 shape = RoundedCornerShape(50)
             )
     )
-}
-
-@Composable
-fun NumberKeyboard(
-    onNumberClick: (String) -> Unit = {},
-    onBackspace: () -> Unit = {},
-    onClear: () -> Unit = {}
-) {
-    val numbers = listOf(
-        listOf("1", "2", "3"),
-        listOf("4", "5", "6"),
-        listOf("7", "8", "9"),
-        listOf("*", "0", "#")
-    )
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        numbers.forEach { row ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                row.forEach { number ->
-                    if (number == "*" || number == "#") {
-                        // Skip these keys or make them function keys
-                        Box(modifier = Modifier.weight(1f))
-                    } else {
-                        KeyboardButton(
-                            text = number,
-                            onClick = { onNumberClick(number) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Action buttons row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Button(
-                onClick = onClear,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(56.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF4a4a5e)
-                )
-            ) {
-                Text("Clear", color = Color.White)
-            }
-
-            Button(
-                onClick = onBackspace,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(56.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF4a4a5e)
-                )
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Clear,
-                    contentDescription = "Backspace",
-                    tint = Color.White
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun KeyboardButton(
-    text: String,
-    onClick: () -> Unit = {},
-    modifier: Modifier = Modifier
-) {
-    Button(
-        onClick = onClick,
-        modifier = modifier
-            .height(56.dp)
-            .shadow(elevation = 4.dp, shape = RoundedCornerShape(12.dp)),
-        shape = RoundedCornerShape(12.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = Color(0xFF2a2a3e)
-        )
-    ) {
-        Text(
-            text = text,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF9575CD)
-        )
-    }
 }
