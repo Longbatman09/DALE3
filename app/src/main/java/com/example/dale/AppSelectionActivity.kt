@@ -1,7 +1,6 @@
 package com.example.dale
 
 import android.content.Intent
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import android.os.Bundle
@@ -22,10 +21,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
@@ -33,6 +30,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
@@ -40,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -58,6 +57,7 @@ import com.example.dale.ui.theme.DALETheme
 import com.example.dale.ui.theme.Purple40
 import com.example.dale.ui.theme.Purple80
 import com.example.dale.utils.SharedPreferencesManager
+import android.content.pm.ResolveInfo
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 
@@ -66,48 +66,216 @@ class AppSelectionActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val allApps = getInstalledApps()
-
         setContent {
             DALETheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    AppSelectionScreen(
+                    AppSelectionScreenWithLoading(
                         modifier = Modifier.padding(innerPadding),
-                        allApps = allApps,
-                        activity = this,
-                        packageManager = packageManager
+                        activity = this
                     )
                 }
             }
         }
     }
 
-    private fun getInstalledApps(): List<AppInfo> {
+    fun getInstalledAppsPublic(): List<AppInfo> {
         val apps = mutableListOf<AppInfo>()
         val packageManager = packageManager
-        val packages = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+        val addedPackages = mutableSetOf<String>()
 
-        for (appInfo in packages) {
-            if ((appInfo.flags and ApplicationInfo.FLAG_SYSTEM) == 0 && packageName != appInfo.packageName) {
-                val label = packageManager.getApplicationLabel(appInfo).toString()
-                // Try to load the app icon; fall back to null on error
+        // 1) Get all installed applications (include system apps)
+        val installedApps = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+        for (appInfo in installedApps) {
+            if (packageName == appInfo.packageName) continue
+
+            val label = try {
+                packageManager.getApplicationLabel(appInfo).toString()
+            } catch (_: Exception) {
+                appInfo.packageName
+            }
+
+            val iconDrawable: Drawable? = try {
+                packageManager.getApplicationIcon(appInfo.packageName)
+            } catch (_: Exception) {
+                null
+            }
+
+            val isSystem = (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
+
+            apps.add(
+                AppInfo(
+                    packageName = appInfo.packageName,
+                    appName = label,
+                    icon = iconDrawable,
+                    isSystem = isSystem,
+                    isLauncher = false
+                )
+            )
+            addedPackages.add(appInfo.packageName)
+        }
+
+        // 2) Also include apps that are launchable (ACTION_MAIN, CATEGORY_LAUNCHER)
+        val launcherIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+        val resolveInfos: List<ResolveInfo> = packageManager.queryIntentActivities(launcherIntent, PackageManager.MATCH_ALL)
+        for (resolveInfo in resolveInfos) {
+            val ai = resolveInfo.activityInfo ?: continue
+            val pkg = ai.packageName
+            if (pkg == packageName) continue
+            if (addedPackages.contains(pkg)) continue
+
+            val label = try {
+                resolveInfo.loadLabel(packageManager).toString()
+            } catch (_: Exception) {
+                pkg
+            }
+
+            val iconDrawable: Drawable? = try {
+                resolveInfo.loadIcon(packageManager)
+            } catch (_: Exception) {
+                null
+            }
+
+            val isSystem = try {
+                val aiInfo = packageManager.getApplicationInfo(pkg, 0)
+                (aiInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
+            } catch (_: Exception) {
+                false
+            }
+
+            apps.add(
+                AppInfo(
+                    packageName = pkg,
+                    appName = label,
+                    icon = iconDrawable,
+                    isSystem = isSystem,
+                    isLauncher = true
+                )
+            )
+            addedPackages.add(pkg)
+        }
+
+        // 3) Best-effort: if Island is installed, try to surface any additional launcher entries
+        try {
+            packageManager.getPackageInfo("com.oasisfeng.island", 0)
+            val islandResolveInfos = packageManager.queryIntentActivities(launcherIntent, PackageManager.MATCH_ALL)
+            for (resolveInfo in islandResolveInfos) {
+                val ai = resolveInfo.activityInfo ?: continue
+                val pkg = ai.packageName
+                if (pkg == packageName) continue
+                if (addedPackages.contains(pkg)) continue
+
+                val label = try {
+                    resolveInfo.loadLabel(packageManager).toString()
+                } catch (_: Exception) {
+                    pkg
+                }
+
                 val iconDrawable: Drawable? = try {
-                    packageManager.getApplicationIcon(appInfo.packageName)
-                } catch (e: Exception) {
+                    resolveInfo.loadIcon(packageManager)
+                } catch (_: Exception) {
                     null
+                }
+
+                val isSystem = try {
+                    val aiInfo = packageManager.getApplicationInfo(pkg, 0)
+                    (aiInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
+                } catch (_: Exception) {
+                    false
                 }
 
                 apps.add(
                     AppInfo(
-                        packageName = appInfo.packageName,
+                        packageName = pkg,
                         appName = label,
-                        icon = iconDrawable
+                        icon = iconDrawable,
+                        isSystem = isSystem,
+                        isLauncher = true
                     )
                 )
+                addedPackages.add(pkg)
             }
+        } catch (_: Exception) {
+            // Island not installed — nothing extra to do
         }
 
-        return apps.sortedBy { it.appName }
+        return apps.distinctBy { it.packageName }.sortedBy { it.appName }
+    }
+}
+
+@Composable
+fun AppSelectionScreenWithLoading(
+    modifier: Modifier = Modifier,
+    activity: ComponentActivity? = null
+) {
+    val isLoading = remember { mutableStateOf(true) }
+    val allApps = remember { mutableStateOf<List<AppInfo>>(emptyList()) }
+
+    // Load apps asynchronously on first composition
+    LaunchedEffect(Unit) {
+        try {
+            val apps = (activity as? AppSelectionActivity)?.getInstalledAppsPublic() ?: emptyList()
+            allApps.value = apps
+        } catch (_: Exception) {
+            allApps.value = emptyList()
+        } finally {
+            isLoading.value = false
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF1a1a2e),
+                        Color(0xFF16213e)
+                    )
+                )
+            )
+    ) {
+        if (isLoading.value) {
+            // Loading Screen
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .size(60.dp)
+                        .padding(bottom = 24.dp),
+                    color = Purple40,
+                    strokeWidth = 4.dp
+                )
+
+                Text(
+                    text = "Loading Apps",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Purple80,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                Text(
+                    text = "Please wait while we fetch your installed apps...",
+                    fontSize = 14.sp,
+                    color = Color(0xFFB0B0B0),
+                    textAlign = TextAlign.Center
+                )
+            }
+        } else {
+            // Main App Selection Screen
+            AppSelectionScreen(
+                modifier = Modifier.fillMaxSize(),
+                allApps = allApps.value,
+                activity = activity
+            )
+        }
     }
 }
 
@@ -115,13 +283,26 @@ class AppSelectionActivity : ComponentActivity() {
 fun AppSelectionScreen(
     modifier: Modifier = Modifier,
     allApps: List<AppInfo> = emptyList(),
-    activity: ComponentActivity? = null,
-    packageManager: PackageManager? = null
+    activity: ComponentActivity? = null
 ) {
-    val selectionState = remember { mutableStateOf(0) } // 0: Select App 1, 1: Select App 2, 2: Rename Group
+    val selectionState = remember { mutableStateOf(0) }
     val app1 = remember { mutableStateOf<AppInfo?>(null) }
     val app2 = remember { mutableStateOf<AppInfo?>(null) }
     val groupName = remember { mutableStateOf("") }
+
+    // Category filter state: 0 -> All / Installed, 1 -> System, 2 -> Launcher
+    val selectedCategory = remember { mutableStateOf(0) }
+
+    // Partition apps into categories
+    val installedApps = allApps.filter { !it.isSystem }
+    val systemApps = allApps.filter { it.isSystem }
+    val launcherApps = allApps.filter { it.isLauncher }
+
+    val appsToShow = when (selectedCategory.value) {
+        1 -> systemApps
+        2 -> launcherApps
+        else -> installedApps
+    }
 
     Box(
         modifier = modifier
@@ -138,22 +319,25 @@ fun AppSelectionScreen(
         when (selectionState.value) {
             0 -> AppSelectionStep(
                 title = "SELECT APP 1",
-                apps = allApps,
+                apps = appsToShow,
                 onAppSelected = { selectedApp ->
                     app1.value = selectedApp
                     selectionState.value = 1
                 },
-                activity = activity
+                onBack = null,
+                selectedCategory = selectedCategory.value,
+                onCategoryChange = { selectedCategory.value = it }
             )
             1 -> AppSelectionStep(
                 title = "SELECT APP 2",
-                apps = allApps.filter { it.packageName != app1.value?.packageName },
+                apps = appsToShow.filter { it.packageName != app1.value?.packageName },
                 onAppSelected = { selectedApp ->
                     app2.value = selectedApp
                     selectionState.value = 2
                 },
-                activity = activity,
-                onBack = { selectionState.value = 0 }
+                onBack = { selectionState.value = 0 },
+                selectedCategory = selectedCategory.value,
+                onCategoryChange = { selectedCategory.value = it }
             )
             2 -> GroupNameScreen(
                 app1 = app1.value,
@@ -161,7 +345,6 @@ fun AppSelectionScreen(
                 groupName = groupName.value,
                 onGroupNameChange = { groupName.value = it },
                 onConfirm = {
-                    // Save the app group
                     val appGroup = AppGroup(
                         id = System.currentTimeMillis().toString(),
                         groupName = groupName.value.ifEmpty { "${app1.value?.appName} + ${app2.value?.appName}" },
@@ -171,10 +354,8 @@ fun AppSelectionScreen(
                         app2Name = app2.value?.appName ?: ""
                     )
 
-                    // Store in SharedPreferences or database
                     SharedPreferencesManager.getInstance(activity!!).saveAppGroup(appGroup)
 
-                    // Navigate to lock screen setup
                     val intent = Intent(activity, LockScreenSetupActivity::class.java)
                     intent.putExtra("groupId", appGroup.id)
                     activity.startActivity(intent)
@@ -187,12 +368,34 @@ fun AppSelectionScreen(
 }
 
 @Composable
+fun CategoryChip(text: String, selected: Boolean = false, onClick: () -> Unit = {}, fontSize: Float = 12f) {
+    Card(
+        modifier = Modifier
+            .shadow(elevation = if (selected) 6.dp else 2.dp, shape = RoundedCornerShape(20.dp))
+            .clickable { onClick() },
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) Color(0xFF0f3460) else Color(0xFF0a2940)
+        )
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            color = Purple80,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = fontSize.sp
+        )
+    }
+}
+
+@Composable
 fun AppSelectionStep(
     title: String,
     apps: List<AppInfo>,
     onAppSelected: (AppInfo) -> Unit,
-    activity: ComponentActivity?,
-    onBack: (() -> Unit)? = null
+    onBack: (() -> Unit)? = null,
+    selectedCategory: Int = 0,
+    onCategoryChange: (Int) -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -203,7 +406,7 @@ fun AppSelectionStep(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 16.dp),
+                .padding(bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (onBack != null) {
@@ -228,6 +431,33 @@ fun AppSelectionStep(
                     // Placeholder for alignment
                 }
             }
+        }
+
+        // Category chips placed below the Select title with smaller text
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            CategoryChip(
+                text = "INSTALLED APPS",
+                selected = selectedCategory == 0,
+                onClick = { onCategoryChange(0) },
+                fontSize = 12f
+            )
+            CategoryChip(
+                text = "SYSTEM APPS",
+                selected = selectedCategory == 1,
+                onClick = { onCategoryChange(1) },
+                fontSize = 12f
+            )
+            CategoryChip(
+                text = "LAUNCHER APPS",
+                selected = selectedCategory == 2,
+                onClick = { onCategoryChange(2) },
+                fontSize = 12f
+            )
         }
 
         // Apps List

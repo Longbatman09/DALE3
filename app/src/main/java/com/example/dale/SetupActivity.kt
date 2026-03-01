@@ -2,21 +2,23 @@ package com.example.dale
 
 import android.content.ComponentName
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.net.toUri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -32,11 +34,9 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -51,7 +51,6 @@ import androidx.compose.ui.unit.sp
 import com.example.dale.ui.theme.DALETheme
 import com.example.dale.ui.theme.Purple40
 import com.example.dale.ui.theme.Purple80
-import com.example.dale.utils.SharedPreferencesManager
 
 class SetupActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -70,7 +69,6 @@ class SetupActivity : ComponentActivity() {
                         deviceModel = deviceModel,
                         deviceManufacturer = deviceManufacturer,
                         hasDualAppSupport = hasDualAppSupport,
-                        onSetupComplete = { completeSetup() },
                         onOpenDualAppSettings = { openDualAppSettings() },
                         onOpenIsland = { openIslandPlayStore() },
                         activity = this
@@ -164,7 +162,7 @@ class SetupActivity : ComponentActivity() {
 
         try {
             startActivity(intent)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             // Fallback to general settings
             startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))
         }
@@ -173,24 +171,16 @@ class SetupActivity : ComponentActivity() {
     private fun openIslandPlayStore() {
         val playStoreUrl = "https://play.google.com/store/apps/details?id=com.oasisfeng.island"
         val intent = Intent(Intent.ACTION_VIEW).apply {
-            data = Uri.parse(playStoreUrl)
+            data = playStoreUrl.toUri()
         }
         try {
             startActivity(intent)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             val webIntent = Intent(Intent.ACTION_VIEW).apply {
-                data = Uri.parse(playStoreUrl)
+                data = playStoreUrl.toUri()
             }
             startActivity(webIntent)
         }
-    }
-
-    private fun completeSetup() {
-        SharedPreferencesManager.getInstance(this).setSetupCompleted(true)
-        val intent = Intent(this, MainActivity::class.java)
-        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        startActivity(intent)
-        finish()
     }
 }
 
@@ -200,7 +190,6 @@ fun SetupScreen(
     deviceModel: String = "Unknown",
     deviceManufacturer: String = "Unknown",
     hasDualAppSupport: Boolean = false,
-    onSetupComplete: () -> Unit = {},
     onOpenDualAppSettings: () -> Unit = {},
     onOpenIsland: () -> Unit = {},
     activity: ComponentActivity? = null
@@ -246,7 +235,7 @@ fun SetupScreen(
                 color = Purple80,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 16.dp),
+                    .padding(bottom = 12.dp),
                 textAlign = TextAlign.Left
             )
 
@@ -254,7 +243,7 @@ fun SetupScreen(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 16.dp)
+                    .padding(bottom = 20.dp)
                     .shadow(
                         elevation = 8.dp,
                         shape = RoundedCornerShape(16.dp)
@@ -267,54 +256,77 @@ fun SetupScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(20.dp),
+                        .padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 12.dp),
+                            .padding(bottom = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             imageVector = Icons.Default.Info,
                             contentDescription = "Device Info",
                             tint = Purple80,
-                            modifier = Modifier.padding(end = 2.dp)
+                            modifier = Modifier
+                                .size(20.dp)
+                                .padding(end = 8.dp)
                         )
                         Text(
                             text = "Device Information",
-                            fontSize = 16.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Purple80
                         )
                     }
 
-                    HorizontalDivider(color = Color(0xFF1a3a52), modifier = Modifier.padding(bottom = 12.dp))
+                    HorizontalDivider(color = Color(0xFF1a3a52), modifier = Modifier.padding(vertical = 8.dp))
 
-                    Text(
-                        text = "Manufacturer: $deviceManufacturer",
-                        fontSize = 14.sp,
-                        color = Color(0xFFE0E0E0),
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 8.dp)
-                    )
+                            .padding(bottom = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Manufacturer:",
+                            fontSize = 13.sp,
+                            color = Color(0xFFB0B0B0)
+                        )
+                        Text(
+                            text = deviceManufacturer,
+                            fontSize = 13.sp,
+                            color = Color(0xFFE0E0E0),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
 
-                    Text(
-                        text = "Model: $deviceModel",
-                        fontSize = 14.sp,
-                        color = Color(0xFFE0E0E0),
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 8.dp)
-                    )
+                            .padding(bottom = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Model:",
+                            fontSize = 13.sp,
+                            color = Color(0xFFB0B0B0)
+                        )
+                        Text(
+                            text = deviceModel,
+                            fontSize = 13.sp,
+                            color = Color(0xFFE0E0E0),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
 
                     if (hasDualAppSupport) {
+                        HorizontalDivider(color = Color(0xFF1a3a52), modifier = Modifier.padding(vertical = 8.dp))
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 8.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
@@ -322,12 +334,12 @@ fun SetupScreen(
                                 contentDescription = "Supported",
                                 tint = Color(0xFF4CAF50),
                                 modifier = Modifier
-                                    .height(20.dp)
+                                    .size(18.dp)
                                     .padding(end = 8.dp)
                             )
                             Text(
                                 text = "Built-in Dual App Support Available",
-                                fontSize = 13.sp,
+                                fontSize = 12.sp,
                                 color = Color(0xFF4CAF50),
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -336,7 +348,7 @@ fun SetupScreen(
                 }
             }
 
-            // Dual App Methods
+            // Choose Your Method Header
             Text(
                 text = "Choose Your Method",
                 fontSize = 18.sp,
@@ -348,109 +360,132 @@ fun SetupScreen(
                 textAlign = TextAlign.Center
             )
 
-            // Method 1: Built-in (if supported)
-            if (hasDualAppSupport) {
-                MethodCardClickable(
-                    title = "Method 1: Native Dual App",
-                    description = "Use your device's built-in dual app feature",
-                    isRecommended = true,
-                    onClick = { showMethod1Dialog.value = true }
+            // Methods Container
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp)
+                    .shadow(
+                        elevation = 4.dp,
+                        shape = RoundedCornerShape(16.dp)
+                    ),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color(0xFF0a2940).copy(alpha = 0.5f)
                 )
-            } else {
-                // Show Method 1 as info card even if not directly supported
-                Card(
+            ) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 16.dp)
-                        .shadow(
-                            elevation = 8.dp,
-                            shape = RoundedCornerShape(16.dp),
-                            ambientColor = Color(0xFF4CAF50).copy(alpha = 0.2f)
-                        ),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFF0a2940)
-                    )
+                        .padding(12.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp)
-                    ) {
-                        Row(
+                    // Method 1: Built-in (if supported)
+                    if (hasDualAppSupport) {
+                        MethodCardClickable(
+                            title = "Method 1: Native Dual App",
+                            description = "Use your device's built-in dual app feature",
+                            isRecommended = true,
+                            onClick = { showMethod1Dialog.value = true }
+                        )
+                    } else {
+                        // Show Method 1 as unsupported card with dark background
+                        Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .padding(bottom = 12.dp)
+                                .shadow(
+                                    elevation = 2.dp,
+                                    shape = RoundedCornerShape(12.dp)
+                                ),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = Color(0xFF051a2e)
+                            )
                         ) {
-                            Text(
-                                text = "Method 1: Native Dual App",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Purple80
-                            )
-                            Text(
-                                text = "UNSUPPORTED",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
+                            Column(
                                 modifier = Modifier
-                                    .background(
-                                        color = Color(0xFFFF9800),
-                                        shape = RoundedCornerShape(4.dp)
+                                    .fillMaxWidth()
+                                    .padding(14.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Method 1: Native Dual App",
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF666666)
                                     )
-                                    .padding(horizontal = 4.dp, vertical = 2.dp)
-                            )
+                                    Text(
+                                        text = "UNSUPPORTED",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        modifier = Modifier
+                                            .background(
+                                                color = Color(
+
+                                                ),
+                                                shape = RoundedCornerShape(3.dp)
+                                            )
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "Not available for your device. Use Method 2 instead.",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF555555)
+                                )
+                            }
                         }
-                        Text(
-                            text = "Not available for your device. Use Method 2 instead.",
-                            fontSize = 16.sp,
-                            color = Color(0xFFB0B0B0)
-                        )
                     }
+
+                    // Method 2: Island App (Universal)
+                    MethodCardClickable(
+                        title = "Method 2: Island App (Universal)",
+                        description = "Works on all devices",
+                        isRecommended = !hasDualAppSupport,
+                        onClick = onOpenIsland,
+                        isMethod2 = true
+                    )
                 }
             }
-
-            // Method 2: Island App (Universal)
-            MethodCardClickable(
-                title = "Method 2: Island App (Universal)",
-                description = "Works on all devices",
-                isRecommended = !hasDualAppSupport,
-                onClick = onOpenIsland,
-                isMethod2 = true
-            )
-
-            Box(modifier = Modifier.height(16.dp))
 
             // Info Box
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 16.dp),
+                    .padding(bottom = 12.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = Color(0xFF1a3a52)
                 )
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp)
+                    modifier = Modifier.padding(12.dp)
                 ) {
                     Text(
                         text = "ℹ️ Tip",
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFFB0B0B0),
                         modifier = Modifier.padding(bottom = 4.dp)
                     )
                     Text(
                         text = "You can use either method. Island is recommended for maximum privacy and compatibility across all devices.",
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         color = Color(0xFFB0B0B0),
-                        lineHeight = 18.sp
+                        lineHeight = 16.sp
                     )
                 }
             }
+
+            // Spacer to push button to bottom
+            Spacer(modifier = Modifier.weight(1f))
 
             // Next Step Button
             Button(
@@ -477,8 +512,6 @@ fun SetupScreen(
                     color = Color.White
                 )
             }
-
-            Box(modifier = Modifier.height(16.dp))
         }
     }
 }
@@ -494,24 +527,21 @@ fun MethodCardClickable(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 16.dp)
+            .padding(bottom = 12.dp)
             .shadow(
-                elevation = 8.dp,
-                shape = RoundedCornerShape(16.dp),
-                ambientColor = if (isRecommended) Color(0xFF4CAF50).copy(alpha = 0.3f) else Purple40.copy(
-                    alpha = 0.2f
-                )
+                elevation = 4.dp,
+                shape = RoundedCornerShape(12.dp)
             ),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isRecommended) Color(0xFF0a2940) else Color(0xFF0f3460)
+            containerColor = if (isRecommended) Color(0xFF0f3460) else Color(0xFF0a2940)
         )
     ) {
         Button(
             onClick = onClick,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(120.dp),
+                .height(100.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = Color.Transparent
             ),
@@ -522,49 +552,49 @@ fun MethodCardClickable(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp),
+                    .padding(16.dp),
                 horizontalAlignment = Alignment.Start,
                 verticalArrangement = Arrangement.Center
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 8.dp),
+                        .padding(bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
                         text = title,
-                        fontSize = 16.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         color = Purple80
                     )
                     if (isRecommended) {
                         Text(
                             text = "RECOMMENDED",
-                            fontSize = 10.sp,
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White,
                             modifier = Modifier
                                 .background(
                                     color = Color(0xFF4CAF50),
-                                    shape = RoundedCornerShape(4.dp)
+                                    shape = RoundedCornerShape(3.dp)
                                 )
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
                 }
 
                 Text(
                     text = description,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     color = Color(0xFFB0B0B0),
                     modifier = Modifier.padding(bottom = 4.dp)
                 )
 
                 Text(
                     text = if (isMethod2) "Tap to download from Play Store →" else "Tap to open device settings →",
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = Purple80,
                     fontWeight = FontWeight.SemiBold
                 )
