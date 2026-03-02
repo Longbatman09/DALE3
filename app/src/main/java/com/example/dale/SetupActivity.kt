@@ -260,9 +260,7 @@ fun SetupScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
@@ -281,12 +279,15 @@ fun SetupScreen(
                         )
                     }
 
-                    HorizontalDivider(color = Color(0xFF1a3a52), modifier = Modifier.padding(vertical = 8.dp))
+                    HorizontalDivider(
+                        color = Color(0xFF1a3a52),
+                        modifier = Modifier.padding(top = 0.dp, bottom = 0.dp)
+                    )
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 2.dp),
+                            .padding(bottom = 0.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -427,9 +428,7 @@ fun SetupScreen(
                                         color = Color.White,
                                         modifier = Modifier
                                             .background(
-                                                color = Color(
-
-                                                ),
+                                                color = Color(0xFFE91E63),
                                                 shape = RoundedCornerShape(3.dp)
                                             )
                                             .padding(horizontal = 6.dp, vertical = 2.dp)
@@ -870,4 +869,3 @@ fun SetupScreenPreview() {
         )
     }
 }
-
