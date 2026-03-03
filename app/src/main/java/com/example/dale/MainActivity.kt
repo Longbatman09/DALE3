@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -115,57 +116,14 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
                     )
                 }
 
-                // DALE Title
+                // DALE Title moved to right
                 Text(
                     text = "DALE",
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
-
-                // Placeholder for alignment
-                Box(modifier = Modifier.size(40.dp))
             }
-
-            // Group Name Indicator
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .background(
-                            color = Purple40,
-                            shape = CircleShape
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "G",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
-                Text(
-                    text = "Group_Name",
-                    fontSize = 14.sp,
-                    color = Color.White,
-                    modifier = Modifier.padding(start = 8.dp)
-                )
-            }
-
-            // Divider
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(Color(0xFF30475e))
-                    .padding(horizontal = 16.dp)
-            )
 
             // Groups List
             if (allGroups.value.isEmpty()) {
@@ -191,8 +149,8 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
                     items(allGroups.value) { group ->
                         GroupCard(
                             groupName = group.groupName,
-                            app1Name = group.app1Name,
-                            app2Name = group.app2Name,
+                            app1Package = group.app1PackageName,
+                            app2Package = group.app2PackageName,
                             isLocked = group.isLocked,
                             onClick = {
                                 // Handle group click
@@ -230,8 +188,8 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
 @Composable
 fun GroupCard(
     groupName: String,
-    app1Name: String,
-    app2Name: String,
+    app1Package: String,
+    app2Package: String,
     isLocked: Boolean,
     onClick: () -> Unit
 ) {
@@ -264,8 +222,8 @@ fun GroupCard(
                     color = Color.White
                 )
                 Text(
-                    text = "$app1Name + $app2Name",
-                    fontSize = 12.sp,
+                    text = "$app1Package + $app2Package",
+                    fontSize = 11.sp,
                     color = Color.Gray,
                     modifier = Modifier.padding(top = 4.dp)
                 )
