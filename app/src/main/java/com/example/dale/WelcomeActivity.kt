@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -80,11 +81,10 @@ fun WelcomeScreen(modifier: Modifier = Modifier, onStartSetup: () -> Unit = {}) 
             modifier = Modifier
                 .fillMaxSize()
                 .padding(24.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top spacing
-            Box(modifier = Modifier.height(40.dp))
+            // Spacer to push the card down
+            Spacer(modifier = Modifier.weight(1f))
 
             // Content Card
             Card(
@@ -148,6 +148,9 @@ fun WelcomeScreen(modifier: Modifier = Modifier, onStartSetup: () -> Unit = {}) 
                 }
             }
 
+            // Spacer to push the button all the way down and center the card
+            Spacer(modifier = Modifier.weight(1f))
+
             // Start Setup Button
             Button(
                 onClick = onStartSetup,
@@ -182,4 +185,3 @@ fun WelcomeScreenPreview() {
         WelcomeScreen()
     }
 }
-
