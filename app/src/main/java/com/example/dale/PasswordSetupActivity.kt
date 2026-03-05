@@ -131,14 +131,6 @@ class PasswordSetupActivity : ComponentActivity() {
         }
     }
 
-    fun openAppInfo() {
-        val intent = Intent(
-            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-            "package:$packageName".toUri()
-        )
-        startActivity(intent)
-    }
-
     fun completePasswordSetup(groupId: String) {
         val sharedPrefsManager = SharedPreferencesManager.getInstance(this)
         val appGroup = sharedPrefsManager.getAppGroup(groupId)
@@ -311,8 +303,7 @@ fun PasswordSetupScreen(
                 },
                 text = {
                     Text(
-                        "DALE needs the 'Display over other apps' permission so it can show the lock screen overlay.\n\n" +
-                                "We will open the system settings where you can grant the permission to DALE. If DALE is not visible in the special access list, you can open the app info page and search for special access or permissions."
+                        "DALE needs the 'Display over other apps' permission so it can show the lock screen overlay."
                     )
                 },
                 confirmButton = {
@@ -321,25 +312,6 @@ fun PasswordSetupScreen(
                         (activity as? PasswordSetupActivity)?.proceedToOverlayPermission(groupId)
                     }) {
                         Text("Open Overlay Settings")
-                    }
-                },
-                dismissButton = {
-                    Row {
-                        TextButton(onClick = {
-                            showOverlayDialog.value = false
-                            // open App Info to help user locate the permission if overlay list hides DALE
-                            (activity as? PasswordSetupActivity)?.openAppInfo()
-                        }) {
-                            Text("Open App Info")
-                        }
-
-                        TextButton(onClick = {
-                            showOverlayDialog.value = false
-                            // user cancelled; still mark setup complete (pins saved)
-                            (activity as? PasswordSetupActivity)?.completePasswordSetup(groupId)
-                        }) {
-                            Text("Skip")
-                        }
                     }
                 }
             )

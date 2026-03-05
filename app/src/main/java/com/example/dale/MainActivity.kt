@@ -1,7 +1,12 @@
 package com.example.dale
 
+import android.app.AppOpsManager
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -24,6 +29,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FloatingActionButton
@@ -31,7 +38,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -70,13 +79,148 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        // Start the monitoring service if permissions are granted
+        checkAndRequestPermissions()
+    }
+
+    private fun checkAndRequestPermissions() {
+        val hasUsageAccess = hasUsageStatsPermission()
+        val hasOverlayPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Settings.canDrawOverlays(this)
+        } else {
+            true
+        }
+
+        if (hasUsageAccess && hasOverlayPermission) {
+            startMonitoringService()
+        }
+        // If permissions are missing, they'll be shown in the HomeScreen UI
+    }
+
+    private fun hasUsageStatsPermission(): Boolean {
+        val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appOps.unsafeCheckOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(),
+                packageName
+            )
+        } else {
+            appOps.checkOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(),
+                packageName
+            )
+        }
+        return mode == AppOpsManager.MODE_ALLOWED
+    }
+
+    private fun startMonitoringService() {
+        val serviceIntent = Intent(this, AppMonitorService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Check permissions again when returning to the app
+        checkAndRequestPermissions()
     }
 }
 
 @Composable
 fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = null) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val sharedPrefs = SharedPreferencesManager.getInstance(activity as ComponentActivity)
     val allGroups = remember { mutableStateOf(sharedPrefs.getAllAppGroups()) }
+
+    val showUsagePermissionDialog = remember { mutableStateOf(false) }
+    val showOverlayPermissionDialog = remember { mutableStateOf(false) }
+
+    // Check permissions
+    LaunchedEffect(Unit) {
+        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val hasUsageAccess = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appOps.unsafeCheckOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(),
+                context.packageName
+            ) == AppOpsManager.MODE_ALLOWED
+        } else {
+            appOps.checkOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(),
+                context.packageName
+            ) == AppOpsManager.MODE_ALLOWED
+        }
+
+        val hasOverlayPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Settings.canDrawOverlays(context)
+        } else {
+            true
+        }
+
+        if (!hasUsageAccess) {
+            showUsagePermissionDialog.value = true
+        } else if (!hasOverlayPermission) {
+            showOverlayPermissionDialog.value = true
+        }
+    }
+
+    // Usage Stats Permission Dialog
+    if (showUsagePermissionDialog.value) {
+        AlertDialog(
+            onDismissRequest = { showUsagePermissionDialog.value = false },
+            title = { Text("Usage Access Required") },
+            text = { Text("DALE needs usage access permission to monitor and lock apps. Please grant this permission in the next screen.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showUsagePermissionDialog.value = false
+                    val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                    context.startActivity(intent)
+                }) {
+                    Text("Grant Permission")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUsagePermissionDialog.value = false }) {
+                    Text("Later")
+                }
+            }
+        )
+    }
+
+    // Overlay Permission Dialog
+    if (showOverlayPermissionDialog.value) {
+        AlertDialog(
+            onDismissRequest = { showOverlayPermissionDialog.value = false },
+            title = { Text("Draw Over Other Apps") },
+            text = { Text("DALE needs permission to display lock screen over other apps. Please enable this in settings.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showOverlayPermissionDialog.value = false
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        val intent = Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:${context.packageName}")
+                        )
+                        context.startActivity(intent)
+                    }
+                }) {
+                    Text("Grant Permission")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showOverlayPermissionDialog.value = false }) {
+                    Text("Later")
+                }
+            }
+        )
+    }
 
     Box(
         modifier = modifier
