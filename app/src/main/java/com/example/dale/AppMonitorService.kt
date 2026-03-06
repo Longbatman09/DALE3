@@ -161,9 +161,10 @@ class AppMonitorService : Service() {
         val channel = NotificationChannel(
             CHANNEL_ID,
             "App Monitor Service",
-            NotificationManager.IMPORTANCE_LOW
+            NotificationManager.IMPORTANCE_MIN
         ).apply {
             description = "Monitors apps for lock protection"
+            setShowBadge(false)
         }
 
         val notificationManager = getSystemService(NotificationManager::class.java)
@@ -172,11 +173,12 @@ class AppMonitorService : Service() {
 
     private fun createNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("DALE Protection Active")
-            .setContentText("Monitoring locked apps")
+            .setContentTitle("")
+            .setContentText("")
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
             .setOngoing(true)
+            .setSilent(true)
             .build()
     }
 

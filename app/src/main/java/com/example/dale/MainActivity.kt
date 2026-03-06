@@ -10,6 +10,10 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,11 +21,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -30,19 +36,23 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Divider
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
@@ -50,9 +60,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.example.dale.ui.theme.DALETheme
 import com.example.dale.ui.theme.Purple40
 import com.example.dale.utils.SharedPreferencesManager
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -140,6 +153,9 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
 
     val showUsagePermissionDialog = remember { mutableStateOf(false) }
     val showOverlayPermissionDialog = remember { mutableStateOf(false) }
+    var isMenuOpen by remember { mutableStateOf(false) }
+    var showDestroyConfirmation by remember { mutableStateOf(false) }
+    var showDestroyingScreen by remember { mutableStateOf(false) }
 
     // Check permissions
     LaunchedEffect(Unit) {
@@ -222,6 +238,57 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
         )
     }
 
+    // Destroy Confirmation Dialog
+    if (showDestroyConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showDestroyConfirmation = false },
+            title = {
+                Text(
+                    "Destroy DALE?",
+                    color = Color(0xFFFF5252),
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text("This will permanently delete all groups and app data. This action cannot be undone.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDestroyConfirmation = false
+                        showDestroyingScreen = true
+                    }
+                ) {
+                    Text("DESTROY", color = Color(0xFFFF5252), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDestroyConfirmation = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Destroying Loading Screen
+    if (showDestroyingScreen) {
+        DestroyingLoadingScreen(
+            onComplete = {
+                // Clear all app data
+                sharedPrefs.clearAllData()
+
+                // Navigate back to welcome screen
+                activity?.let {
+                    val intent = Intent(it, WelcomeActivity::class.java)
+                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                    it.startActivity(intent)
+                    it.finish()
+                }
+            }
+        )
+        return // Don't render the rest of the UI
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -249,7 +316,7 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
             ) {
                 // Menu Icon
                 IconButton(
-                    onClick = { /* Menu action */ },
+                    onClick = { isMenuOpen = !isMenuOpen },
                     modifier = Modifier.size(40.dp)
                 ) {
                     Icon(
@@ -305,6 +372,41 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
             }
         }
 
+        // Semi-transparent overlay when menu is open
+        if (isMenuOpen) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .clickable { isMenuOpen = false }
+                    .zIndex(1f)
+            )
+        }
+
+        // Sliding Menu
+        AnimatedVisibility(
+            visible = isMenuOpen,
+            enter = slideInHorizontally(
+                initialOffsetX = { -it },
+                animationSpec = tween(durationMillis = 300)
+            ),
+            exit = slideOutHorizontally(
+                targetOffsetX = { -it },
+                animationSpec = tween(durationMillis = 300)
+            ),
+            modifier = Modifier.zIndex(2f)
+        ) {
+            SideMenu(
+                onClose = { isMenuOpen = false },
+                onMenuItemClick = { menuItem ->
+                    if (menuItem == "Destroy") {
+                        showDestroyConfirmation = true
+                    }
+                    isMenuOpen = false
+                }
+            )
+        }
+
         // Floating Action Button (Add)
         FloatingActionButton(
             onClick = {
@@ -316,7 +418,8 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
             },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(16.dp),
+                .padding(16.dp)
+                .zIndex(0f),
             containerColor = Purple40
         ) {
             Icon(
@@ -391,3 +494,139 @@ fun GroupCard(
         }
     }
 }
+
+@Composable
+fun SideMenu(
+    onClose: () -> Unit,
+    onMenuItemClick: (String) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(250.dp)
+            .background(Color(0xFF0f3460))
+            .shadow(8.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(vertical = 16.dp)
+        ) {
+            // Menu Header
+            Text(
+                text = "Menu",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
+            )
+
+            Divider(
+                color = Color.White.copy(alpha = 0.2f),
+                thickness = 1.dp,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            // Destroy DALE Button at bottom
+            MenuItem(
+                text = "Destroy DALE",
+                icon = "🗑️",
+                onClick = { onMenuItemClick("Destroy") },
+                isDestructive = true
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+fun MenuItem(
+    text: String,
+    icon: String,
+    onClick: () -> Unit,
+    isDestructive: Boolean = false
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .background(
+                if (isDestructive) Color(0xFFD32F2F).copy(alpha = 0.15f) else Color.Transparent
+            )
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = icon,
+            fontSize = 20.sp,
+            modifier = Modifier.padding(end = 16.dp)
+        )
+        Text(
+            text = text,
+            fontSize = 16.sp,
+            color = if (isDestructive) Color(0xFFFF5252) else Color.White,
+            fontWeight = if (isDestructive) FontWeight.Bold else FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+fun DestroyingLoadingScreen(onComplete: () -> Unit) {
+    val dotState = remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        // Animate dots
+        val job = launch {
+            while (true) {
+                dotState.intValue = (dotState.intValue + 1) % 4
+                delay(350)
+            }
+        }
+
+        // Wait minimum 2 seconds
+        delay(2000L)
+        job.cancel()
+
+        // Complete the destruction
+        onComplete()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF1a1a2e),
+                        Color(0xFF16213e)
+                    )
+                )
+            )
+            .padding(horizontal = 24.dp, vertical = 20.dp)
+    ) {
+        Text(
+            text = "Destroying" + ".".repeat(dotState.intValue),
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Color(0xFFFF5252),
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(bottom = 14.dp)
+        )
+
+        LinearProgressIndicator(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(6.dp),
+            color = Color(0xFFFF5252),
+            trackColor = Color(0xFF0A2940)
+        )
+    }
+}
+

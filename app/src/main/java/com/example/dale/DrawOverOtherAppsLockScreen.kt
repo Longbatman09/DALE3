@@ -35,6 +35,7 @@ import com.example.dale.ui.theme.Purple40
 import com.example.dale.ui.theme.Purple80
 import com.example.dale.utils.SharedPreferencesManager
 import kotlinx.coroutines.delay
+import java.security.MessageDigest
 
 class DrawOverOtherAppsLockScreen : ComponentActivity() {
 
@@ -143,7 +144,12 @@ fun LockScreenContent(
             isVerifying = true
             delay(300)
 
-            if (pin == correctPin) {
+            // Hash the entered PIN for comparison
+            val hashedPin = MessageDigest.getInstance("SHA-256")
+                .digest(pin.toByteArray())
+                .joinToString("") { "%02x".format(it) }
+
+            if (hashedPin == correctPin) {
                 errorMessage = null
                 onUnlockSuccess(appPackage)
             } else {
@@ -160,7 +166,7 @@ fun LockScreenContent(
                     else -> null
                 }
 
-                if (otherAppPin != null && pin == otherAppPin && otherAppPackage != null) {
+                if (otherAppPin != null && hashedPin == otherAppPin && otherAppPackage != null) {
                     // User entered the other app's PIN - open that app instead
                     errorMessage = null
                     onUnlockSuccess(otherAppPackage)

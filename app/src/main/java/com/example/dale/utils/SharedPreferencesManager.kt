@@ -42,6 +42,10 @@ class SharedPreferencesManager private constructor(context: Context) {
         return groups.sortedByDescending { it.createdAt }
     }
 
+    fun clearAllData() {
+        sharedPreferences.edit().clear().apply()
+    }
+
     companion object {
         private const val PREFS_NAME = "DALE_PREFS"
         private const val KEY_SETUP_COMPLETED = "setup_completed"

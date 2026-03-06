@@ -18,6 +18,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -28,6 +30,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -41,7 +44,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -55,6 +57,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -63,7 +66,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -339,7 +341,7 @@ fun AppSelectionScreen(
     val groupName = remember { mutableStateOf("") }
     val stepTransitionDurationMs = 450
 
-    // Category filter state: 0 -> All / Installed, 1 -> System, 2 -> Launcher
+    // Category filter state: 0 -> Installed, 1 -> System
     val selectedCategory = remember { mutableStateOf(0) }
 
     val usedPackagesToGroupName = remember(activity) {
@@ -361,11 +363,9 @@ fun AppSelectionScreen(
     // Partition apps into categories
     val installedApps = allApps.filter { !it.isSystem }
     val systemApps = allApps.filter { it.isSystem }
-    val launcherApps = allApps.filter { it.isLauncher }
 
     val appsToShow = when (selectedCategory.value) {
         1 -> systemApps
-        2 -> launcherApps
         else -> installedApps
     }
 
@@ -446,13 +446,21 @@ fun AppSelectionScreen(
 
 @Composable
 fun CategoryChip(text: String, selected: Boolean = false, onClick: () -> Unit = {}, fontSize: Float = 12f) {
+    val containerColor = remember(selected) {
+        if (selected) Color(0xFF0f3460) else Color(0xFF0a2940)
+    }
+
+    val elevation = remember(selected) {
+        if (selected) 4.dp else 1.dp
+    }
+
     Card(
         modifier = Modifier
-            .shadow(elevation = if (selected) 6.dp else 2.dp, shape = RoundedCornerShape(20.dp))
+            .shadow(elevation = elevation, shape = RoundedCornerShape(20.dp))
             .clickable { onClick() },
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (selected) Color(0xFF0f3460) else Color(0xFF0a2940)
+            containerColor = containerColor
         )
     ) {
         Text(
@@ -475,10 +483,68 @@ fun AppSelectionStep(
     onCategoryChange: (Int) -> Unit = {},
     usedPackagesToGroupName: Map<String, String> = emptyMap()
 ) {
+    var isTransitioning by remember { mutableStateOf(false) }
+    var swipeOffset by remember { mutableStateOf(0f) }
+    var lastCategory by remember { mutableStateOf(selectedCategory) }
+    val swipeThreshold = 100f
+
+    // Detect when category changes and show transition
+    LaunchedEffect(selectedCategory) {
+        if (selectedCategory != lastCategory) {
+            isTransitioning = true
+            lastCategory = selectedCategory
+            delay(300)
+        }
+    }
+
+    // Reset transition and swipe offset when it completes
+    LaunchedEffect(isTransitioning) {
+        if (isTransitioning && selectedCategory == lastCategory) {
+            isTransitioning = false
+            swipeOffset = 0f
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = {
+                        swipeOffset = 0f
+                    },
+                    onDragEnd = {
+                        // Check if swipe exceeded threshold
+                        if (kotlin.math.abs(swipeOffset) > swipeThreshold && !isTransitioning) {
+                            if (swipeOffset > 0) {
+                                // Swiped right
+                                when (selectedCategory) {
+                                    1 -> {
+                                        isTransitioning = true
+                                        onCategoryChange(0) // System → Installed
+                                    }
+                                }
+                            } else if (swipeOffset < 0) {
+                                // Swiped left
+                                when (selectedCategory) {
+                                    0 -> {
+                                        isTransitioning = true
+                                        onCategoryChange(1) // Installed → System
+                                    }
+                                }
+                            }
+                        }
+                        swipeOffset = 0f
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        if (!isTransitioning) {
+                            swipeOffset += dragAmount
+                        }
+                    }
+                )
+            }
     ) {
         // Header uses fixed slots so both app selection screens keep identical layout.
         Row(
@@ -514,7 +580,7 @@ fun AppSelectionStep(
             Box(modifier = Modifier.size(48.dp))
         }
 
-        // Category chips placed below the Select title with smaller text
+        // Category chips - Only Installed and System
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -533,30 +599,54 @@ fun AppSelectionStep(
                 onClick = { onCategoryChange(1) },
                 fontSize = 12f
             )
-            CategoryChip(
-                text = "LAUNCHER APPS",
-                selected = selectedCategory == 2,
-                onClick = { onCategoryChange(2) },
-                fontSize = 12f
-            )
         }
 
-        // Apps List
-        LazyColumn(
+        // Apps List Container with sliding overlay animation
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .weight(1f)
         ) {
-            items(apps) { app ->
-                val usedByGroup = usedPackagesToGroupName[app.packageName]
-                AppListCard(
-                    appName = app.appName,
-                    packageName = app.packageName,
-                    icon = app.icon,
-                    onClick = { onAppSelected(app) },
-                    enabled = usedByGroup == null,
-                    usageMessage = usedByGroup?.let { "App already used in $it" }
+            // App List
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(
+                    items = apps,
+                    key = { app -> app.packageName }
+                ) { app ->
+                    val usedByGroup = usedPackagesToGroupName[app.packageName]
+                    AppListCard(
+                        appName = app.appName,
+                        packageName = app.packageName,
+                        icon = app.icon,
+                        onClick = { onAppSelected(app) },
+                        enabled = usedByGroup == null,
+                        usageMessage = usedByGroup?.let { "App already used in $it" }
+                    )
+                }
+            }
+
+            // Sliding overlay box animation that follows finger movement
+            if (isTransitioning || swipeOffset != 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0xFF1a1a2e),
+                                    Color(0xFF16213e)
+                                )
+                            )
+                        )
+                        .alpha(
+                            if (isTransitioning) 0.9f
+                            else kotlin.math.min(kotlin.math.abs(swipeOffset) / 200f, 0.9f)
+                        )
                 )
             }
         }
@@ -572,18 +662,32 @@ fun AppListCard(
     enabled: Boolean = true,
     usageMessage: String? = null
 ) {
+    // Cache bitmap conversion to prevent recalculation on every scroll
+    val cachedBitmap = remember(icon) {
+        icon?.toBitmap()?.asImageBitmap()
+    }
+
+    // Cache container color to avoid recalculation
+    val containerColor = remember(enabled) {
+        if (enabled) Color(0xFF0f3460) else Color(0xFF020D1A)
+    }
+
+    val alpha = remember(enabled) {
+        if (enabled) 1f else 0.45f
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .shadow(
-                elevation = 4.dp,
+                elevation = 2.dp,
                 shape = RoundedCornerShape(12.dp)
             )
-            .alpha(if (enabled) 1f else 0.45f)
+            .alpha(alpha)
             .clickable(enabled = enabled) { onClick() },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (enabled) Color(0xFF0f3460) else Color(0xFF020D1A)
+            containerColor = containerColor
         )
     ) {
         Box(modifier = Modifier.fillMaxWidth()) {
@@ -595,10 +699,9 @@ fun AppListCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                    if (icon != null) {
-                        val imageBitmap = remember(icon) { icon.toBitmap().asImageBitmap() }
+                    if (cachedBitmap != null) {
                         Image(
-                            bitmap = imageBitmap,
+                            bitmap = cachedBitmap,
                             contentDescription = appName,
                             modifier = Modifier
                                 .size(40.dp)
@@ -620,22 +723,6 @@ fun AppListCard(
                             color = Color(0xFFB0B0B0)
                         )
                     }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .background(
-                            color = if (enabled) Purple40 else Color(0xFF3A4B5D),
-                            shape = CircleShape
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "→",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
                 }
             }
 
@@ -712,7 +799,7 @@ fun GroupNameScreen(
                 .fillMaxWidth()
                 .padding(bottom = 24.dp)
                 .shadow(
-                    elevation = 8.dp,
+                    elevation = 4.dp,
                     shape = RoundedCornerShape(12.dp)
                 ),
             shape = RoundedCornerShape(12.dp),
@@ -815,7 +902,7 @@ fun GroupNameScreen(
                 .fillMaxWidth()
                 .height(56.dp)
                 .shadow(
-                    elevation = 8.dp,
+                    elevation = 4.dp,
                     shape = RoundedCornerShape(12.dp)
                 ),
             shape = RoundedCornerShape(12.dp),

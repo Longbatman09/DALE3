@@ -489,8 +489,8 @@ fun PinEntryScreen(
             OutlinedTextField(
                 value = currentPinState.value,
                 onValueChange = { value ->
-                    // allow only digits and limit to 6
-                    val filtered = value.filter { it.isDigit() }.take(6)
+                    // allow only digits and limit to 4
+                    val filtered = value.filter { it.isDigit() }.take(4)
                     currentPinState.value = filtered
                 },
                 visualTransformation = PasswordVisualTransformation(),
@@ -588,7 +588,7 @@ fun PinDisplayBox(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                repeat(6) { index ->
+                repeat(4) { index ->
                     PinDot(isFilled = index < pin.length)
                 }
             }
