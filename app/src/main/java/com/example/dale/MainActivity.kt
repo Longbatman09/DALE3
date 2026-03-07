@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.dale.ui.theme.DALETheme
 import com.example.dale.ui.theme.Purple40
+import com.example.dale.ui.theme.Purple80
 import com.example.dale.utils.SharedPreferencesManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -333,6 +334,29 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
+                )
+            }
+
+            // "All Groups" header section
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp)
+            ) {
+                Text(
+                    text = "All Groups",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Purple80,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                // Divider line
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(Color(0xFF2a4a6a))
                 )
             }
 

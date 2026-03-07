@@ -9,17 +9,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -30,7 +23,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -53,11 +45,9 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -483,68 +473,10 @@ fun AppSelectionStep(
     onCategoryChange: (Int) -> Unit = {},
     usedPackagesToGroupName: Map<String, String> = emptyMap()
 ) {
-    var isTransitioning by remember { mutableStateOf(false) }
-    var swipeOffset by remember { mutableStateOf(0f) }
-    var lastCategory by remember { mutableStateOf(selectedCategory) }
-    val swipeThreshold = 100f
-
-    // Detect when category changes and show transition
-    LaunchedEffect(selectedCategory) {
-        if (selectedCategory != lastCategory) {
-            isTransitioning = true
-            lastCategory = selectedCategory
-            delay(300)
-        }
-    }
-
-    // Reset transition and swipe offset when it completes
-    LaunchedEffect(isTransitioning) {
-        if (isTransitioning && selectedCategory == lastCategory) {
-            isTransitioning = false
-            swipeOffset = 0f
-        }
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onDragStart = {
-                        swipeOffset = 0f
-                    },
-                    onDragEnd = {
-                        // Check if swipe exceeded threshold
-                        if (kotlin.math.abs(swipeOffset) > swipeThreshold && !isTransitioning) {
-                            if (swipeOffset > 0) {
-                                // Swiped right
-                                when (selectedCategory) {
-                                    1 -> {
-                                        isTransitioning = true
-                                        onCategoryChange(0) // System → Installed
-                                    }
-                                }
-                            } else if (swipeOffset < 0) {
-                                // Swiped left
-                                when (selectedCategory) {
-                                    0 -> {
-                                        isTransitioning = true
-                                        onCategoryChange(1) // Installed → System
-                                    }
-                                }
-                            }
-                        }
-                        swipeOffset = 0f
-                    },
-                    onHorizontalDrag = { change, dragAmount ->
-                        change.consume()
-                        if (!isTransitioning) {
-                            swipeOffset += dragAmount
-                        }
-                    }
-                )
-            }
     ) {
         // Header uses fixed slots so both app selection screens keep identical layout.
         Row(
@@ -601,52 +533,25 @@ fun AppSelectionStep(
             )
         }
 
-        // Apps List Container with sliding overlay animation
-        Box(
+        // Apps List
+        LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
+                .weight(1f),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // App List
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(
-                    items = apps,
-                    key = { app -> app.packageName }
-                ) { app ->
-                    val usedByGroup = usedPackagesToGroupName[app.packageName]
-                    AppListCard(
-                        appName = app.appName,
-                        packageName = app.packageName,
-                        icon = app.icon,
-                        onClick = { onAppSelected(app) },
-                        enabled = usedByGroup == null,
-                        usageMessage = usedByGroup?.let { "App already used in $it" }
-                    )
-                }
-            }
-
-            // Sliding overlay box animation that follows finger movement
-            if (isTransitioning || swipeOffset != 0f) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                                colors = listOf(
-                                    Color(0xFF1a1a2e),
-                                    Color(0xFF16213e)
-                                )
-                            )
-                        )
-                        .alpha(
-                            if (isTransitioning) 0.9f
-                            else kotlin.math.min(kotlin.math.abs(swipeOffset) / 200f, 0.9f)
-                        )
+            items(
+                items = apps,
+                key = { app -> app.packageName }
+            ) { app ->
+                val usedByGroup = usedPackagesToGroupName[app.packageName]
+                AppListCard(
+                    appName = app.appName,
+                    packageName = app.packageName,
+                    icon = app.icon,
+                    onClick = { onAppSelected(app) },
+                    enabled = usedByGroup == null,
+                    usageMessage = usedByGroup?.let { "App already used in $it" }
                 )
             }
         }
