@@ -56,6 +56,16 @@
             android:label="@string/password_setup_activity_title"
             android:theme="@style/Theme.DALE" />
         <activity
+            android:name=".GroupSettingsActivity"
+            android:exported="false"
+            android:label="Group Settings"
+            android:theme="@style/Theme.DALE" />
+        <activity
+            android:name=".ChangePasswordActivity"
+            android:exported="false"
+            android:label="Change Password"
+            android:theme="@style/Theme.DALE" />
+        <activity
             android:name=".DrawOverOtherAppsLockScreen"
             android:exported="false"
             android:excludeFromRecents="true"

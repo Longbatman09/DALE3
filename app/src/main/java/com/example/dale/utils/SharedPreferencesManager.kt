@@ -42,6 +42,10 @@ class SharedPreferencesManager private constructor(context: Context) {
         return groups.sortedByDescending { it.createdAt }
     }
 
+    fun deleteAppGroup(groupId: String) {
+        sharedPreferences.edit().remove("app_group_$groupId").apply()
+    }
+
     fun clearAllData() {
         sharedPreferences.edit().clear().apply()
     }

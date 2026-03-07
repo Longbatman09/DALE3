@@ -14,8 +14,11 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,7 +33,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -47,6 +49,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -61,6 +64,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.example.dale.ui.theme.DALETheme
 import com.example.dale.ui.theme.Purple40
 import com.example.dale.ui.theme.Purple80
@@ -151,12 +156,31 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
     val context = androidx.compose.ui.platform.LocalContext.current
     val sharedPrefs = SharedPreferencesManager.getInstance(activity as ComponentActivity)
     val allGroups = remember { mutableStateOf(sharedPrefs.getAllAppGroups()) }
+    var refreshTrigger by remember { mutableStateOf(0) }
 
     val showUsagePermissionDialog = remember { mutableStateOf(false) }
     val showOverlayPermissionDialog = remember { mutableStateOf(false) }
     var isMenuOpen by remember { mutableStateOf(false) }
     var showDestroyConfirmation by remember { mutableStateOf(false) }
     var showDestroyingScreen by remember { mutableStateOf(false) }
+
+    // Refresh groups when screen is visible
+    LaunchedEffect(refreshTrigger) {
+        allGroups.value = sharedPrefs.getAllAppGroups()
+    }
+
+    // Add a listener to refresh when activity resumes
+    DisposableEffect(Unit) {
+        val lifecycleObserver = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshTrigger++
+            }
+        }
+        activity?.lifecycle?.addObserver(lifecycleObserver)
+        onDispose {
+            activity?.lifecycle?.removeObserver(lifecycleObserver)
+        }
+    }
 
     // Check permissions
     LaunchedEffect(Unit) {
@@ -388,8 +412,13 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
                             app2Package = group.app2PackageName,
                             isLocked = group.isLocked,
                             onClick = {
-                                // Handle group click
-                            }
+                                // Open GroupSettingsActivity
+                                val intent = Intent(activity, GroupSettingsActivity::class.java)
+                                intent.putExtra("GROUP_ID", group.id)
+                                intent.putExtra("GROUP_NAME", group.groupName)
+                                activity.startActivity(intent)
+                            },
+                            context = activity
                         )
                     }
                 }
@@ -462,8 +491,26 @@ fun GroupCard(
     app1Package: String,
     app2Package: String,
     isLocked: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    context: Context
 ) {
+    // Load app icons
+    val app1Icon = remember(app1Package) {
+        try {
+            context.packageManager.getApplicationIcon(app1Package)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    val app2Icon = remember(app2Package) {
+        try {
+            context.packageManager.getApplicationIcon(app2Package)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -500,20 +547,28 @@ fun GroupCard(
                 )
             }
 
-            // Lock Status Indicator
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .background(
-                        color = if (isLocked) Color(0xFF4CAF50) else Color(0xFF757575),
-                        shape = CircleShape
-                    ),
-                contentAlignment = Alignment.Center
+            // App Icons Display
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = if (isLocked) "🔒" else "🔓",
-                    fontSize = 16.sp
-                )
+                // App 1 Icon
+                if (app1Icon != null) {
+                    Image(
+                        bitmap = app1Icon.toBitmap().asImageBitmap(),
+                        contentDescription = "App 1 Icon",
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                // App 2 Icon
+                if (app2Icon != null) {
+                    Image(
+                        bitmap = app2Icon.toBitmap().asImageBitmap(),
+                        contentDescription = "App 2 Icon",
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
             }
         }
     }
@@ -653,4 +708,3 @@ fun DestroyingLoadingScreen(onComplete: () -> Unit) {
         )
     }
 }
-
