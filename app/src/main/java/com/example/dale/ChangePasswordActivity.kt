@@ -41,8 +41,18 @@ import androidx.compose.ui.unit.sp
 import com.example.dale.ui.theme.DALETheme
 import com.example.dale.ui.theme.Purple80
 import com.example.dale.utils.SharedPreferencesManager
+import java.security.MessageDigest
 
 class ChangePasswordActivity : ComponentActivity() {
+    private fun hashPin(pin: String): String {
+        return MessageDigest.getInstance("SHA-256")
+            .digest(pin.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+    }
+
+    private fun verifyPin(inputPin: String, storedHash: String): Boolean {
+        return hashPin(inputPin) == storedHash
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -57,7 +67,9 @@ class ChangePasswordActivity : ComponentActivity() {
                     groupId = groupId,
                     groupName = groupName,
                     appPackage = appPackage,
-                    activity = this
+                    activity = this,
+                    hashPin = { pin -> this@ChangePasswordActivity.hashPin(pin) },
+                    verifyPin = { input, stored -> this@ChangePasswordActivity.verifyPin(input, stored) }
                 )
             }
         }
@@ -69,7 +81,9 @@ fun ChangePasswordScreen(
     groupId: String,
     groupName: String,
     appPackage: String,
-    activity: ComponentActivity
+    activity: ComponentActivity,
+    hashPin: (String) -> String,
+    verifyPin: (String, String) -> Boolean
 ) {
     val sharedPrefs = SharedPreferencesManager.getInstance(activity)
     val group = remember(groupId, groupName) {
@@ -199,14 +213,14 @@ fun ChangePasswordScreen(
                                 if (currentPin.length < 4) {
                                     currentPin += number
                                     if (currentPin.length == 4) {
-                                        // Verify current PIN
+                                        // Verify current PIN by hashing and comparing
                                         val storedPin = if (appPackage == group?.app1PackageName) {
                                             group?.app1LockPin
                                         } else {
                                             group?.app2LockPin
                                         }
 
-                                        if (currentPin == storedPin) {
+                                        if (storedPin != null && verifyPin(currentPin, storedPin)) {
                                             errorMessage = ""
                                             step = 2
                                         } else {
@@ -220,8 +234,45 @@ fun ChangePasswordScreen(
                                 if (newPin.length < 4) {
                                     newPin += number
                                     if (newPin.length == 4) {
-                                        errorMessage = ""
-                                        step = 3
+                                        // Get the current PIN (old one) for comparison
+                                        val oldPin = if (appPackage == group?.app1PackageName) {
+                                            group?.app1LockPin
+                                        } else {
+                                            group?.app2LockPin
+                                        }
+
+                                        // Get the other app's PIN for comparison
+                                        val otherAppPin = if (appPackage == group?.app1PackageName) {
+                                            group?.app2LockPin
+                                        } else {
+                                            group?.app1LockPin
+                                        }
+
+                                        // Get the other app's name for error message
+                                        val otherAppName = if (appPackage == group?.app1PackageName) {
+                                            group?.app2Name
+                                        } else {
+                                            group?.app1Name
+                                        }
+
+                                        // Validate new PIN
+                                        val isOldPin = oldPin != null && verifyPin(newPin, oldPin)
+                                        val isOtherAppPin = otherAppPin != null && verifyPin(newPin, otherAppPin)
+
+                                        when {
+                                            isOldPin -> {
+                                                errorMessage = "Same as old pin"
+                                                newPin = ""
+                                            }
+                                            isOtherAppPin -> {
+                                                errorMessage = "Same as $otherAppName pin"
+                                                newPin = ""
+                                            }
+                                            else -> {
+                                                errorMessage = ""
+                                                step = 3
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -231,12 +282,13 @@ fun ChangePasswordScreen(
                                     if (confirmPin.length == 4) {
                                         // Verify confirmation
                                         if (newPin == confirmPin) {
-                                            // Update PIN
+                                            // Update PIN with hashing
                                             if (group != null) {
+                                                val hashedPin = hashPin(newPin)
                                                 val updatedGroup = if (appPackage == group.app1PackageName) {
-                                                    group.copy(app1LockPin = newPin)
+                                                    group.copy(app1LockPin = hashedPin)
                                                 } else {
-                                                    group.copy(app2LockPin = newPin)
+                                                    group.copy(app2LockPin = hashedPin)
                                                 }
                                                 sharedPrefs.saveAppGroup(updatedGroup)
                                                 Toast.makeText(activity, "Password changed successfully", Toast.LENGTH_SHORT).show()
