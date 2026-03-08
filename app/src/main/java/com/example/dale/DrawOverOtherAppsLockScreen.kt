@@ -63,6 +63,12 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
         targetPackageName = intent.getStringExtra("TARGET_PACKAGE")
         groupId = intent.getStringExtra("GROUP_ID")
 
+        // Safety check: Never show lock screen for DALE itself
+        if (targetPackageName == packageName) {
+            finish()
+            return
+        }
+
         enableEdgeToEdge()
 
         setContent {
@@ -81,29 +87,33 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
     }
 
     private fun unlockApp(packageName: String) {
-        // Notify the monitor service that app was unlocked
-        val unlockIntent = Intent(AppMonitorService.ACTION_APP_UNLOCKED).apply {
+        // Mark unlock transition immediately.
+        sendBroadcast(Intent(AppMonitorService.ACTION_APP_UNLOCKING).apply {
             putExtra("UNLOCKED_PACKAGE", packageName)
-        }
-        sendBroadcast(unlockIntent)
+        })
 
-        // Small delay to ensure broadcast is received
-        Handler(Looper.getMainLooper()).postDelayed({
-            // Launch the target app
+        handler.postDelayed({
+            // Mark unlock complete before launching target app.
+            sendBroadcast(Intent(AppMonitorService.ACTION_APP_UNLOCKED).apply {
+                putExtra("UNLOCKED_PACKAGE", packageName)
+            })
+
             try {
                 val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
                 if (launchIntent != null) {
                     launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
                     startActivity(launchIntent)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
 
-            // Close this lock screen
             finish()
-        }, 100)
+        }, 250)
+    }
+
+    companion object {
+        private val handler = Handler(Looper.getMainLooper())
     }
 }
 
@@ -375,6 +385,9 @@ fun NumberButton(
         )
     }
 }
+
+
+
 
 
 

@@ -160,6 +160,7 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
 
     val showUsagePermissionDialog = remember { mutableStateOf(false) }
     val showOverlayPermissionDialog = remember { mutableStateOf(false) }
+    val showBatteryOptimizationDialog = remember { mutableStateOf(false) }
     var isMenuOpen by remember { mutableStateOf(false) }
     var showDestroyConfirmation by remember { mutableStateOf(false) }
     var showDestroyingScreen by remember { mutableStateOf(false) }
@@ -205,10 +206,20 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
             true
         }
 
+        // Check battery optimization
+        val isBatteryOptimizationDisabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            powerManager.isIgnoringBatteryOptimizations(context.packageName)
+        } else {
+            true
+        }
+
         if (!hasUsageAccess) {
             showUsagePermissionDialog.value = true
         } else if (!hasOverlayPermission) {
             showOverlayPermissionDialog.value = true
+        } else if (!isBatteryOptimizationDisabled) {
+            showBatteryOptimizationDialog.value = true
         }
     }
 
@@ -257,6 +268,33 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
             },
             dismissButton = {
                 TextButton(onClick = { showOverlayPermissionDialog.value = false }) {
+                    Text("Later")
+                }
+            }
+        )
+    }
+
+    // Battery Optimization Dialog
+    if (showBatteryOptimizationDialog.value) {
+        AlertDialog(
+            onDismissRequest = { showBatteryOptimizationDialog.value = false },
+            title = { Text("Disable Battery Optimization") },
+            text = { Text("DALE needs to be excluded from battery optimization to work reliably. This ensures the lock screen appears consistently when you open protected apps.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showBatteryOptimizationDialog.value = false
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                            data = Uri.parse("package:${context.packageName}")
+                        }
+                        context.startActivity(intent)
+                    }
+                }) {
+                    Text("Disable Optimization")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBatteryOptimizationDialog.value = false }) {
                     Text("Later")
                 }
             }
