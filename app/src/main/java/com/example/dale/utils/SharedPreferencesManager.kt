@@ -64,4 +64,3 @@ class SharedPreferencesManager private constructor(context: Context) {
         }
     }
 }
-

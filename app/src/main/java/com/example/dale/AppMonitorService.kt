@@ -5,6 +5,8 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -121,14 +123,145 @@ class AppMonitorService : Service() {
             return
         }
 
-        val foregroundProtectedPackage = detectForegroundProtectedPackage(protectedPackageToGroupId.keys)
-        if (foregroundProtectedPackage == null) {
+        val activeProtectedPackage = detectActiveProtectedPackage(protectedPackageToGroupId.keys)
+        if (activeProtectedPackage == null) {
             handleNoProtectedForeground()
             return
         }
 
-        val groupId = protectedPackageToGroupId[foregroundProtectedPackage] ?: return
-        handleAppTransition(foregroundProtectedPackage, groupId)
+        val groupId = protectedPackageToGroupId[activeProtectedPackage] ?: return
+        handleAppTransition(activeProtectedPackage, groupId)
+    }
+
+    private fun detectActiveProtectedPackage(protectedPackages: Set<String>): String? {
+        detectFromUsageEvents(protectedPackages)?.let { return it }
+
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return null
+
+        // Requested strategy: try top activity from running tasks first.
+        detectFromRunningTasks(am, protectedPackages)?.let { return it }
+
+        // Fallback path for devices/ROMs where running tasks is restricted.
+        return detectFromRunningProcesses(am, protectedPackages)
+    }
+
+    private fun detectFromUsageEvents(protectedPackages: Set<String>): String? {
+        val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+            ?: return null
+
+        val endTime = System.currentTimeMillis()
+        val startTime = endTime - usageWindowMs
+        val events = usageStatsManager.queryEvents(startTime, endTime)
+        val event = UsageEvents.Event()
+
+        var latestProtectedPackage: String? = null
+        var latestTimestamp = Long.MIN_VALUE
+
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            val eventType = event.eventType
+            val isForegroundEvent = eventType == UsageEvents.Event.MOVE_TO_FOREGROUND ||
+                eventType == UsageEvents.Event.ACTIVITY_RESUMED
+            if (!isForegroundEvent) continue
+
+            val pkg = event.packageName ?: continue
+            if (pkg == packageName) continue
+            if (!protectedPackages.contains(pkg)) continue
+
+            if (event.timeStamp >= latestTimestamp) {
+                latestTimestamp = event.timeStamp
+                latestProtectedPackage = pkg
+            }
+        }
+
+        latestProtectedPackage?.let {
+            Log.d(TAG, "Detector=usageEvents pkg=$it")
+        }
+        return latestProtectedPackage
+    }
+
+    @Suppress("DEPRECATION")
+    private fun detectFromRunningTasks(
+        am: ActivityManager,
+        protectedPackages: Set<String>
+    ): String? {
+        return try {
+            val tasks = am.getRunningTasks(1)
+            if (tasks.isNullOrEmpty()) return null
+
+            val task = tasks[0]
+            val topPkg = task.topActivity?.packageName
+            val basePkg = task.baseActivity?.packageName
+
+            when {
+                topPkg != null && topPkg != packageName && protectedPackages.contains(topPkg) -> {
+                    Log.d(TAG, "Detector=getRunningTasks top=$topPkg")
+                    topPkg
+                }
+                basePkg != null && basePkg != packageName && protectedPackages.contains(basePkg) -> {
+                    Log.d(TAG, "Detector=getRunningTasks base=$basePkg")
+                    basePkg
+                }
+                else -> null
+            }
+        } catch (t: Throwable) {
+            Log.d(TAG, "getRunningTasks unavailable, fallback to runningAppProcesses")
+            null
+        }
+    }
+
+    private fun detectFromRunningProcesses(
+        am: ActivityManager,
+        protectedPackages: Set<String>
+    ): String? {
+        val running = am.runningAppProcesses ?: return null
+        if (running.isEmpty()) return null
+
+        var best: ProcessCandidate? = null
+        for (proc in running) {
+            val pkg = pickProtectedPackageFromProcess(proc, protectedPackages) ?: continue
+            if (pkg == packageName) continue
+
+            val candidate = ProcessCandidate(
+                pkg = pkg,
+                importance = proc.importance,
+                importanceRank = importanceRank(proc.importance)
+            )
+
+            if (best == null || candidate.importanceRank < best!!.importanceRank) {
+                best = candidate
+            }
+        }
+
+        val chosen = best ?: return null
+        return if (chosen.importanceRank <= ACTIVE_IMPORTANCE_RANK_MAX) {
+            Log.d(TAG, "Detector=runningAppProcesses pkg=${chosen.pkg} importance=${chosen.importance}")
+            chosen.pkg
+        } else {
+            null
+        }
+    }
+
+    private fun pickProtectedPackageFromProcess(
+        proc: ActivityManager.RunningAppProcessInfo,
+        protectedPackages: Set<String>
+    ): String? {
+        val processName = proc.processName?.substringBefore(":")
+        if (processName != null && protectedPackages.contains(processName)) {
+            return processName
+        }
+
+        val pkgList = proc.pkgList ?: return null
+        return pkgList.firstOrNull { pkg -> pkg != packageName && protectedPackages.contains(pkg) }
+    }
+
+    private fun importanceRank(importance: Int): Int {
+        return when (importance) {
+            ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND -> 0
+            ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE -> 1
+            ActivityManager.RunningAppProcessInfo.IMPORTANCE_PERCEPTIBLE -> 2
+            else -> 3
+        }
     }
 
     private fun refreshProtectedPackageMapIfNeeded() {
@@ -146,39 +279,13 @@ class AppMonitorService : Service() {
         lastGroupRefreshMs = now
     }
 
-    private fun detectForegroundProtectedPackage(protectedPackages: Set<String>): String? {
-        val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return null
-        val running = am.runningAppProcesses ?: return null
-        if (running.isEmpty()) return null
-
-        val candidates = running
-            .asSequence()
-            .filter {
-                it.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND ||
-                    it.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
-            }
-            .sortedBy { it.importance }
-
-        for (proc in candidates) {
-            val fromPkgList = proc.pkgList
-                ?.firstOrNull { pkg -> pkg != packageName && protectedPackages.contains(pkg) }
-            if (fromPkgList != null) return fromPkgList
-
-            val processName = proc.processName ?: continue
-            val normalized = processName.substringBefore(":")
-            if (normalized != packageName && protectedPackages.contains(normalized)) {
-                return normalized
-            }
-        }
-        return null
-    }
-
     private fun handleNoProtectedForeground() {
         val previous = lastForegroundPackage ?: return
         val now = System.currentTimeMillis()
 
         if (previous !in unlockingApps) {
             backgroundSince.putIfAbsent(previous, now)
+            Log.d(TAG, "Protected app moved to background: $previous")
         }
         lockInProgress.remove(previous)
         lastForegroundPackage = null
@@ -238,6 +345,7 @@ class AppMonitorService : Service() {
 
         if (currentPackage !in lockInProgress) {
             lockInProgress.add(currentPackage)
+            Log.d(TAG, "Launching lock screen for: $currentPackage")
             showLockScreen(currentPackage, groupId)
         }
     }
@@ -296,5 +404,13 @@ class AppMonitorService : Service() {
         private const val NOTIFICATION_ID = 1001
         const val ACTION_APP_UNLOCKED = "com.example.dale.APP_UNLOCKED"
         const val ACTION_APP_UNLOCKING = "com.example.dale.APP_UNLOCKING"
+        private const val ACTIVE_IMPORTANCE_RANK_MAX = 2
+        private const val usageWindowMs = 5000L
     }
+
+    private data class ProcessCandidate(
+        val pkg: String,
+        val importance: Int,
+        val importanceRank: Int
+    )
 }

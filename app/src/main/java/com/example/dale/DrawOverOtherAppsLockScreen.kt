@@ -41,14 +41,29 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
 
     private var targetPackageName: String? = null
     private var groupId: String? = null
+    private var isPinVerified = false
+    private val refocusHandler = Handler(Looper.getMainLooper())
+    private val refocusRunnable = Runnable {
+        if (!isPinVerified && !isFinishing) {
+            bringToFront()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Make this activity appear over other apps
+        // Make this activity appear over other apps and stay on top
         window.addFlags(
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
         )
+
+        // Set highest priority to stay above other activities
+        window.attributes = window.attributes.apply {
+            type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        }
 
         // Handle back button press
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -87,6 +102,10 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
     }
 
     private fun unlockApp(packageName: String) {
+        // Mark PIN as verified before unlocking
+        isPinVerified = true
+        refocusHandler.removeCallbacks(refocusRunnable)
+
         // Mark unlock transition immediately.
         sendBroadcast(Intent(AppMonitorService.ACTION_APP_UNLOCKING).apply {
             putExtra("UNLOCKED_PACKAGE", packageName)
@@ -108,8 +127,48 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
                 e.printStackTrace()
             }
 
-            finish()
+            // Close lock screen with no animation and remove from recents
+            finishAndRemoveTask()
         }, 250)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus && !isPinVerified && !isFinishing) {
+            // Lock screen lost focus, schedule to bring it back
+            refocusHandler.postDelayed(refocusRunnable, 100)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (!isPinVerified && !isFinishing) {
+            // Activity paused without PIN verification, bring it back
+            refocusHandler.postDelayed(refocusRunnable, 50)
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!isPinVerified && !isFinishing) {
+            // Activity stopped without PIN verification, bring it back immediately
+            bringToFront()
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        refocusHandler.removeCallbacks(refocusRunnable)
+    }
+
+    private fun bringToFront() {
+        val intent = Intent(this, DrawOverOtherAppsLockScreen::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            putExtra("TARGET_PACKAGE", targetPackageName)
+            putExtra("GROUP_ID", groupId)
+        }
+        startActivity(intent)
     }
 
     companion object {
@@ -222,23 +281,6 @@ fun LockScreenContent(
                     .padding(bottom = 24.dp)
             )
 
-            // App Name
-            Text(
-                text = appName,
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-                color = Purple80,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-
-            Text(
-                text = "is locked",
-                fontSize = 16.sp,
-                color = Color(0xFFB0B0B0),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(bottom = 32.dp)
-            )
 
             // Title
             Text(
@@ -385,9 +427,5 @@ fun NumberButton(
         )
     }
 }
-
-
-
-
 
 

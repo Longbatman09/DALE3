@@ -149,6 +149,11 @@ class MainActivity : ComponentActivity() {
         // Check permissions again when returning to the app
         checkAndRequestPermissions()
     }
+
+    override fun onBackPressed() {
+        // Close DALE completely and return to home screen when back is pressed
+        finishAndRemoveTask()
+    }
 }
 
 @Composable
