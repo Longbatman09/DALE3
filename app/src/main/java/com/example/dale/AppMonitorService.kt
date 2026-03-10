@@ -41,21 +41,61 @@ class AppMonitorService : Service() {
     private var lastGroupRefreshMs = 0L
     private val groupRefreshIntervalMs = 2000L
 
+    private val pendingCrossUnlocks = mutableMapOf<String, CrossUnlockHandoff>()
+    private val crossUnlockSuppressMs = 5000L
+
     private val unlockReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            val pkg = intent?.getStringExtra("UNLOCKED_PACKAGE") ?: return
+            val destinationPackage = intent?.getStringExtra("UNLOCKED_PACKAGE") ?: return
+            val sourcePackage = intent.getStringExtra("SOURCE_PACKAGE")
+            val groupId = intent.getStringExtra("GROUP_ID")
+            val isCrossUnlock = !sourcePackage.isNullOrBlank() && sourcePackage != destinationPackage
+            val now = System.currentTimeMillis()
+
             when (intent.action) {
                 ACTION_APP_UNLOCKING -> {
-                    unlockingApps.add(pkg)
-                    Log.d(TAG, "Unlocking: $pkg")
+                    lockInProgress.remove(destinationPackage)
+                    backgroundSince.remove(destinationPackage)
+
+                    if (isCrossUnlock && sourcePackage != null) {
+                        unlockingApps.add(sourcePackage)
+                        unlockingApps.add(destinationPackage)
+                        lockInProgress.remove(sourcePackage)
+                        backgroundSince.remove(sourcePackage)
+                        unlockTimestamps[sourcePackage] = now
+                        unlockTimestamps[destinationPackage] = now
+                        pendingCrossUnlocks[destinationPackage] = CrossUnlockHandoff(
+                            sourcePackage = sourcePackage,
+                            destinationPackage = destinationPackage,
+                            groupId = groupId,
+                            createdAt = now,
+                            firstObservedAt = null,
+                            stableForegroundPolls = 0
+                        )
+                        Log.d(TAG, "Cross-unlocking: $sourcePackage -> $destinationPackage")
+                    } else {
+                        unlockingApps.add(destinationPackage)
+                        pendingCrossUnlocks.remove(destinationPackage)
+                        Log.d(TAG, "Unlocking: $destinationPackage")
+                    }
                 }
                 ACTION_APP_UNLOCKED -> {
-                    unlockingApps.remove(pkg)
-                    unlockedSessions.add(pkg)
-                    backgroundSince.remove(pkg)
-                    lockInProgress.remove(pkg)
-                    unlockTimestamps[pkg] = System.currentTimeMillis()
-                    Log.d(TAG, "Unlocked: $pkg")
+                    if (isCrossUnlock && sourcePackage != null) {
+                        lockInProgress.remove(sourcePackage)
+                        lockInProgress.remove(destinationPackage)
+                        backgroundSince.remove(sourcePackage)
+                        backgroundSince.remove(destinationPackage)
+                        unlockTimestamps[sourcePackage] = now
+                        unlockTimestamps[destinationPackage] = now
+                        Log.d(TAG, "Cross-unlock broadcast completed: $sourcePackage -> $destinationPackage")
+                    } else {
+                        unlockingApps.remove(destinationPackage)
+                        unlockedSessions.add(destinationPackage)
+                        backgroundSince.remove(destinationPackage)
+                        lockInProgress.remove(destinationPackage)
+                        unlockTimestamps[destinationPackage] = now
+                        Log.d(TAG, "Unlocked: $destinationPackage")
+                    }
                 }
             }
         }
@@ -154,7 +194,7 @@ class AppMonitorService : Service() {
         val events = usageStatsManager.queryEvents(startTime, endTime)
         val event = UsageEvents.Event()
 
-        var latestProtectedPackage: String? = null
+        var latestForegroundPackage: String? = null
         var latestTimestamp = Long.MIN_VALUE
 
         while (events.hasNextEvent()) {
@@ -166,18 +206,20 @@ class AppMonitorService : Service() {
 
             val pkg = event.packageName ?: continue
             if (pkg == packageName) continue
-            if (!protectedPackages.contains(pkg)) continue
 
             if (event.timeStamp >= latestTimestamp) {
                 latestTimestamp = event.timeStamp
-                latestProtectedPackage = pkg
+                latestForegroundPackage = pkg
             }
         }
 
-        latestProtectedPackage?.let {
-            Log.d(TAG, "Detector=usageEvents pkg=$it")
+        val latestPkg = latestForegroundPackage ?: return null
+        return if (protectedPackages.contains(latestPkg)) {
+            Log.d(TAG, "Detector=usageEvents pkg=$latestPkg")
+            latestPkg
+        } else {
+            null
         }
-        return latestProtectedPackage
     }
 
     @Suppress("DEPRECATION")
@@ -280,6 +322,8 @@ class AppMonitorService : Service() {
     }
 
     private fun handleNoProtectedForeground() {
+        cleanupExpiredCrossUnlocks(System.currentTimeMillis())
+
         val previous = lastForegroundPackage ?: return
         val now = System.currentTimeMillis()
 
@@ -295,11 +339,48 @@ class AppMonitorService : Service() {
         val now = System.currentTimeMillis()
         val previous = lastForegroundPackage
 
+        cleanupExpiredCrossUnlocks(now)
+
         if (previous != null && previous != currentPackage && previous != packageName) {
             if (previous !in unlockingApps) {
                 backgroundSince.putIfAbsent(previous, now)
             }
             lockInProgress.remove(previous)
+        }
+
+        val pendingCrossUnlock = pendingCrossUnlocks[currentPackage]
+        if (pendingCrossUnlock != null) {
+            val updated = pendingCrossUnlock.copy(
+                firstObservedAt = pendingCrossUnlock.firstObservedAt ?: now,
+                stableForegroundPolls = pendingCrossUnlock.stableForegroundPolls + 1
+            )
+            pendingCrossUnlocks[currentPackage] = updated
+            lastForegroundPackage = currentPackage
+            backgroundSince.remove(currentPackage)
+            lockInProgress.remove(currentPackage)
+
+            if (updated.stableForegroundPolls >= 2 || now - updated.createdAt >= 800L) {
+                unlockingApps.remove(updated.sourcePackage)
+                unlockingApps.remove(updated.destinationPackage)
+                unlockedSessions.add(currentPackage)
+                backgroundSince.remove(currentPackage)
+                lockInProgress.remove(currentPackage)
+                unlockTimestamps[currentPackage] = now
+                pendingCrossUnlocks.remove(currentPackage)
+                Log.d(TAG, "Accepted cross-unlock handoff to: $currentPackage")
+            } else {
+                Log.d(TAG, "Waiting for stable cross-unlock handoff to: $currentPackage")
+            }
+            return
+        }
+
+        if (pendingCrossUnlocks.values.any { handoff ->
+                handoff.sourcePackage == currentPackage && now - handoff.createdAt < crossUnlockSuppressMs
+            }) {
+            lastForegroundPackage = currentPackage
+            backgroundSince.remove(currentPackage)
+            lockInProgress.remove(currentPackage)
+            return
         }
 
         lastForegroundPackage = currentPackage
@@ -324,6 +405,7 @@ class AppMonitorService : Service() {
 
         if (currentPackage in unlockingApps) {
             backgroundSince.remove(currentPackage)
+            lockInProgress.remove(currentPackage)
             return
         }
 
@@ -355,6 +437,18 @@ class AppMonitorService : Service() {
         while (iterator.hasNext()) {
             val entry = iterator.next()
             if (now - entry.value > unlockGracePeriodMs) {
+                iterator.remove()
+            }
+        }
+    }
+
+    private fun cleanupExpiredCrossUnlocks(now: Long) {
+        val iterator = pendingCrossUnlocks.entries.iterator()
+        while (iterator.hasNext()) {
+            val handoff = iterator.next().value
+            if (now - handoff.createdAt > crossUnlockSuppressMs) {
+                unlockingApps.remove(handoff.sourcePackage)
+                unlockingApps.remove(handoff.destinationPackage)
                 iterator.remove()
             }
         }
@@ -412,5 +506,14 @@ class AppMonitorService : Service() {
         val pkg: String,
         val importance: Int,
         val importanceRank: Int
+    )
+
+    private data class CrossUnlockHandoff(
+        val sourcePackage: String,
+        val destinationPackage: String,
+        val groupId: String?,
+        val createdAt: Long,
+        val firstObservedAt: Long?,
+        val stableForegroundPolls: Int
     )
 }

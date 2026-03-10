@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import com.example.dale.ui.theme.DALETheme
 import com.example.dale.ui.theme.Purple40
+import com.example.dale.utils.MonitorStartupHelper
 import com.example.dale.utils.SharedPreferencesManager
 import java.security.MessageDigest
 import androidx.compose.material3.OutlinedTextField
@@ -143,6 +144,9 @@ class PasswordSetupActivity : ComponentActivity() {
 
         // Mark setup as completed
         sharedPrefsManager.setSetupCompleted(true)
+
+        // Start monitoring immediately if the required permissions are already available.
+        MonitorStartupHelper.startMonitoringIfPossible(this)
 
         // Navigate to main app
         val intent = Intent(this, MainActivity::class.java)

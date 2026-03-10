@@ -1,13 +1,11 @@
 package com.example.dale
 
-import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
@@ -19,6 +17,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
+import androidx.core.net.toUri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,7 +39,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -69,6 +68,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.example.dale.ui.theme.DALETheme
 import com.example.dale.ui.theme.Purple40
 import com.example.dale.ui.theme.Purple80
+import com.example.dale.utils.MonitorStartupHelper
 import com.example.dale.utils.SharedPreferencesManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -99,60 +99,22 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        onBackPressedDispatcher.addCallback(this) {
+            finishAndRemoveTask()
+        }
+
         // Start the monitoring service if permissions are granted
         checkAndRequestPermissions()
     }
 
     private fun checkAndRequestPermissions() {
-        val hasUsageAccess = hasUsageStatsPermission()
-        val hasOverlayPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Settings.canDrawOverlays(this)
-        } else {
-            true
-        }
-
-        if (hasUsageAccess && hasOverlayPermission) {
-            startMonitoringService()
-        }
-        // If permissions are missing, they'll be shown in the HomeScreen UI
-    }
-
-    private fun hasUsageStatsPermission(): Boolean {
-        val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            appOps.unsafeCheckOpNoThrow(
-                AppOpsManager.OPSTR_GET_USAGE_STATS,
-                android.os.Process.myUid(),
-                packageName
-            )
-        } else {
-            appOps.checkOpNoThrow(
-                AppOpsManager.OPSTR_GET_USAGE_STATS,
-                android.os.Process.myUid(),
-                packageName
-            )
-        }
-        return mode == AppOpsManager.MODE_ALLOWED
-    }
-
-    private fun startMonitoringService() {
-        val serviceIntent = Intent(this, AppMonitorService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
-        } else {
-            startService(serviceIntent)
-        }
+        MonitorStartupHelper.startMonitoringIfPossible(this)
     }
 
     override fun onResume() {
         super.onResume()
         // Check permissions again when returning to the app
         checkAndRequestPermissions()
-    }
-
-    override fun onBackPressed() {
-        // Close DALE completely and return to home screen when back is pressed
-        finishAndRemoveTask()
     }
 }
 
@@ -188,44 +150,19 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
         }
     }
 
-    // Check permissions
-    LaunchedEffect(Unit) {
-        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        val hasUsageAccess = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            appOps.unsafeCheckOpNoThrow(
-                AppOpsManager.OPSTR_GET_USAGE_STATS,
-                android.os.Process.myUid(),
-                context.packageName
-            ) == AppOpsManager.MODE_ALLOWED
-        } else {
-            appOps.checkOpNoThrow(
-                AppOpsManager.OPSTR_GET_USAGE_STATS,
-                android.os.Process.myUid(),
-                context.packageName
-            ) == AppOpsManager.MODE_ALLOWED
+    // Check permissions and refresh monitor start whenever the screen resumes.
+    LaunchedEffect(refreshTrigger) {
+        val hasUsageAccess = MonitorStartupHelper.hasUsageStatsPermission(context)
+        val hasOverlayPermission = MonitorStartupHelper.hasOverlayPermission(context)
+        val isBatteryOptimizationDisabled = MonitorStartupHelper.isIgnoringBatteryOptimizations(context)
+
+        if (hasUsageAccess && hasOverlayPermission) {
+            MonitorStartupHelper.startMonitoringService(context)
         }
 
-        val hasOverlayPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Settings.canDrawOverlays(context)
-        } else {
-            true
-        }
-
-        // Check battery optimization
-        val isBatteryOptimizationDisabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val powerManager = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
-            powerManager.isIgnoringBatteryOptimizations(context.packageName)
-        } else {
-            true
-        }
-
-        if (!hasUsageAccess) {
-            showUsagePermissionDialog.value = true
-        } else if (!hasOverlayPermission) {
-            showOverlayPermissionDialog.value = true
-        } else if (!isBatteryOptimizationDisabled) {
-            showBatteryOptimizationDialog.value = true
-        }
+        showUsagePermissionDialog.value = !hasUsageAccess
+        showOverlayPermissionDialog.value = hasUsageAccess && !hasOverlayPermission
+        showBatteryOptimizationDialog.value = hasUsageAccess && hasOverlayPermission && !isBatteryOptimizationDisabled
     }
 
     // Usage Stats Permission Dialog
@@ -260,13 +197,11 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
             confirmButton = {
                 TextButton(onClick = {
                     showOverlayPermissionDialog.value = false
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        val intent = Intent(
-                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                            Uri.parse("package:${context.packageName}")
-                        )
-                        context.startActivity(intent)
-                    }
+                    val intent = Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        "package:${context.packageName}".toUri()
+                    )
+                    context.startActivity(intent)
                 }) {
                     Text("Grant Permission")
                 }
@@ -283,19 +218,14 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
     if (showBatteryOptimizationDialog.value) {
         AlertDialog(
             onDismissRequest = { showBatteryOptimizationDialog.value = false },
-            title = { Text("Disable Battery Optimization") },
-            text = { Text("DALE needs to be excluded from battery optimization to work reliably. This ensures the lock screen appears consistently when you open protected apps.") },
+            title = { Text("Turn Off Battery Optimization") },
+            text = { Text("DALE should be excluded from battery optimization so protection keeps running reliably in the background.") },
             confirmButton = {
                 TextButton(onClick = {
                     showBatteryOptimizationDialog.value = false
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                            data = Uri.parse("package:${context.packageName}")
-                        }
-                        context.startActivity(intent)
-                    }
+                    MonitorStartupHelper.openBatteryOptimizationSettings(context)
                 }) {
-                    Text("Disable Optimization")
+                    Text("Open Battery Settings")
                 }
             },
             dismissButton = {
@@ -643,7 +573,7 @@ fun SideMenu(
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
             )
 
-            Divider(
+            HorizontalDivider(
                 color = Color.White.copy(alpha = 0.2f),
                 thickness = 1.dp,
                 modifier = Modifier.padding(horizontal = 16.dp)

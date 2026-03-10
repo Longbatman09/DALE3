@@ -6,7 +6,6 @@ import android.os.Handler
 import android.os.Looper
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
-import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
@@ -18,6 +17,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -39,20 +39,17 @@ import java.security.MessageDigest
 
 class DrawOverOtherAppsLockScreen : ComponentActivity() {
 
-    private var targetPackageName: String? = null
-    private var groupId: String? = null
+    private var targetPackageName by mutableStateOf<String?>(null)
+    private var groupId by mutableStateOf<String?>(null)
     private var isPinVerified = false
-    private val refocusHandler = Handler(Looper.getMainLooper())
-    private val refocusRunnable = Runnable {
-        if (!isPinVerified && !isFinishing) {
-            bringToFront()
-        }
-    }
+    private var isDismissing = false
+
+    private val relaunchHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Make this activity appear over other apps and stay on top
+        // Keep screen awake and visible while lock screen is active.
         window.addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
             WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
@@ -60,23 +57,7 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
             WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
         )
 
-        // Set highest priority to stay above other activities
-        window.attributes = window.attributes.apply {
-            type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        }
-
-        // Handle back button press
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                // Prevent back button from closing the lock screen
-                // User must enter correct PIN
-                moveTaskToBack(true)
-            }
-        })
-
-        // Get the target package name and group ID from intent
-        targetPackageName = intent.getStringExtra("TARGET_PACKAGE")
-        groupId = intent.getStringExtra("GROUP_ID")
+        updateTargetState(intent)
 
         // Safety check: Never show lock screen for DALE itself
         if (targetPackageName == packageName) {
@@ -94,27 +75,45 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
                         targetPackageName = targetPackageName,
                         groupId = groupId,
                         onUnlockSuccess = { unlockApp(it) },
-                        onUnlockFail = { /* Handle fail */ }
+                        onUnlockFail = { /* Handle fail */ },
+                        onDismissRequested = { dismissToHome() }
                     )
                 }
             }
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        updateTargetState(intent)
+    }
+
+    private fun updateTargetState(intent: Intent?) {
+        targetPackageName = intent?.getStringExtra("TARGET_PACKAGE")
+        groupId = intent?.getStringExtra("GROUP_ID")
+    }
+
     private fun unlockApp(packageName: String) {
         // Mark PIN as verified before unlocking
         isPinVerified = true
-        refocusHandler.removeCallbacks(refocusRunnable)
+
+        val sourcePackage = targetPackageName
+        val currentGroupId = groupId
 
         // Mark unlock transition immediately.
         sendBroadcast(Intent(AppMonitorService.ACTION_APP_UNLOCKING).apply {
             putExtra("UNLOCKED_PACKAGE", packageName)
+            putExtra("SOURCE_PACKAGE", sourcePackage)
+            putExtra("GROUP_ID", currentGroupId)
         })
 
         handler.postDelayed({
             // Mark unlock complete before launching target app.
             sendBroadcast(Intent(AppMonitorService.ACTION_APP_UNLOCKED).apply {
                 putExtra("UNLOCKED_PACKAGE", packageName)
+                putExtra("SOURCE_PACKAGE", sourcePackage)
+                putExtra("GROUP_ID", currentGroupId)
             })
 
             try {
@@ -127,38 +126,51 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
                 e.printStackTrace()
             }
 
-            // Close lock screen with no animation and remove from recents
             finishAndRemoveTask()
         }, 250)
     }
 
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (!hasFocus && !isPinVerified && !isFinishing) {
-            // Lock screen lost focus, schedule to bring it back
-            refocusHandler.postDelayed(refocusRunnable, 100)
+    private fun dismissToHome() {
+        if (isFinishing || isDismissing || isPinVerified) return
+        isDismissing = true
+
+        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
+        startActivity(homeIntent)
+        finishAndRemoveTask()
     }
 
-    override fun onPause() {
-        super.onPause()
-        if (!isPinVerified && !isFinishing) {
-            // Activity paused without PIN verification, bring it back
-            refocusHandler.postDelayed(refocusRunnable, 50)
+    override fun onBackPressed() {
+        // Ignore system/navigation back; only top-right arrow can dismiss.
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (!isPinVerified && !isDismissing) {
+            relaunchHandler.postDelayed({
+                if (!isFinishing && !isPinVerified && !isDismissing) {
+                    bringToFront()
+                }
+            }, 120)
         }
     }
 
     override fun onStop() {
         super.onStop()
-        if (!isPinVerified && !isFinishing) {
-            // Activity stopped without PIN verification, bring it back immediately
-            bringToFront()
+        if (!isPinVerified && !isDismissing) {
+            relaunchHandler.postDelayed({
+                if (!isFinishing && !isPinVerified && !isDismissing) {
+                    bringToFront()
+                }
+            }, 80)
         }
     }
 
     override fun onDestroy() {
+        relaunchHandler.removeCallbacksAndMessages(null)
         super.onDestroy()
-        refocusHandler.removeCallbacks(refocusRunnable)
     }
 
     private fun bringToFront() {
@@ -182,7 +194,8 @@ fun LockScreenContent(
     targetPackageName: String?,
     groupId: String?,
     onUnlockSuccess: (String) -> Unit,
-    onUnlockFail: () -> Unit
+    onUnlockFail: () -> Unit,
+    onDismissRequested: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val sharedPrefs = SharedPreferencesManager.getInstance(context)
@@ -261,16 +274,32 @@ fun LockScreenContent(
                         Color(0xFF16213e)
                     )
                 )
-            ),
-        contentAlignment = Alignment.Center
+            )
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .align(Alignment.TopCenter)
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.End
         ) {
+            IconButton(onClick = onDismissRequested) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color.White
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 32.dp, vertical = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(modifier = Modifier.height(56.dp))
+
             // Lock Icon
             Icon(
                 imageVector = Icons.Default.Lock,
@@ -330,11 +359,13 @@ fun LockScreenContent(
                 )
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.weight(1f))
 
             // Number Pad
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Rows 1-3 (numbers 1-9)
@@ -427,5 +458,3 @@ fun NumberButton(
         )
     }
 }
-
-
