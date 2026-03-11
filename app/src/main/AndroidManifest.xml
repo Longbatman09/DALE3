@@ -11,6 +11,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:allowBackup="true"
@@ -67,6 +68,21 @@
             android:name=".ChangePasswordActivity"
             android:exported="false"
             android:label="Change Password"
+            android:theme="@style/Theme.DALE" />
+        <activity
+            android:name=".AppLogsActivity"
+            android:exported="false"
+            android:label="App Logs"
+            android:theme="@style/Theme.DALE" />
+        <activity
+            android:name=".ActivityLogsActivity"
+            android:exported="false"
+            android:label="Activity Logs"
+            android:theme="@style/Theme.DALE" />
+        <activity
+            android:name=".UsageLogsActivity"
+            android:exported="false"
+            android:label="Usage Logs"
             android:theme="@style/Theme.DALE" />
         <activity
             android:name=".DrawOverOtherAppsLockScreen"

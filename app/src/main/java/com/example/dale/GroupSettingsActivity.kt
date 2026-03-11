@@ -159,13 +159,17 @@ fun GroupSettingsScreen(
                         onClick = { showAppSelection.value = true }
                     )
 
-                    // App Logs Option (Future Implementation)
+                    // App Logs Option
                     SettingsCard(
                         title = "App Logs",
-                        subtitle = "View activity history (Coming soon)",
+                        subtitle = "Activity logs & usage statistics",
                         icon = Icons.Default.Settings,
-                        onClick = { /* Future implementation */ },
-                        enabled = false
+                        onClick = {
+                            val intent = Intent(activity, AppLogsActivity::class.java)
+                            intent.putExtra("GROUP_ID", group.id)
+                            intent.putExtra("GROUP_NAME", group.groupName)
+                            activity.startActivity(intent)
+                        }
                     )
 
                     // Delete Group Option

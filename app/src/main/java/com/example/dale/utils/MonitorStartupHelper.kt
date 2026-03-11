@@ -41,12 +41,13 @@ object MonitorStartupHelper {
     }
 
     fun canStartMonitoring(context: Context): Boolean {
+        // Core lock-screen requirements
         return hasUsageStatsPermission(context) && hasOverlayPermission(context)
     }
 
     fun startMonitoringIfPossible(context: Context): Boolean {
         if (!canStartMonitoring(context)) {
-            Log.d(TAG, "Skipping monitor start: permissions missing")
+            Log.d(TAG, "Skipping monitor start: usage/overlay permissions missing")
             return false
         }
         startMonitoringService(context)

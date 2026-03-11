@@ -91,7 +91,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             DALETheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    HomeScreen(
+                    MainGate(
                         modifier = Modifier.padding(innerPadding),
                         activity = this
                     )
@@ -102,19 +102,177 @@ class MainActivity : ComponentActivity() {
         onBackPressedDispatcher.addCallback(this) {
             finishAndRemoveTask()
         }
-
-        // Start the monitoring service if permissions are granted
-        checkAndRequestPermissions()
-    }
-
-    private fun checkAndRequestPermissions() {
-        MonitorStartupHelper.startMonitoringIfPossible(this)
     }
 
     override fun onResume() {
         super.onResume()
-        // Check permissions again when returning to the app
-        checkAndRequestPermissions()
+        // Restart service whenever returning, in case it was killed
+        MonitorStartupHelper.startMonitoringIfPossible(this)
+    }
+}
+
+@Composable
+fun MainGate(modifier: Modifier = Modifier, activity: ComponentActivity) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var hasUsage by remember { mutableStateOf(MonitorStartupHelper.hasUsageStatsPermission(context)) }
+    var hasOverlay by remember { mutableStateOf(MonitorStartupHelper.hasOverlayPermission(context)) }
+    var hasBattery by remember { mutableStateOf(MonitorStartupHelper.isIgnoringBatteryOptimizations(context)) }
+    var refreshKey by remember { mutableIntStateOf(0) }
+
+    // Re-check all permissions each time refreshKey changes (triggered on every resume)
+    DisposableEffect(Unit) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshKey++
+            }
+        }
+        activity.lifecycle.addObserver(observer)
+        onDispose { activity.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(refreshKey) {
+        hasUsage = MonitorStartupHelper.hasUsageStatsPermission(context)
+        hasOverlay = MonitorStartupHelper.hasOverlayPermission(context)
+        hasBattery = MonitorStartupHelper.isIgnoringBatteryOptimizations(context)
+
+        // Start lock monitor immediately when core permissions are available.
+        if (hasUsage && hasOverlay) {
+            MonitorStartupHelper.startMonitoringService(context)
+        }
+    }
+
+    when {
+        !hasUsage -> PermissionWallScreen(
+            modifier = modifier,
+            icon = "📊",
+            title = "Usage Access Required",
+            description = "DALE needs to monitor which apps are open so it can show the lock screen at the right time.\n\nFind \"DALE\" in the list and enable \"Permit usage access\".",
+            buttonText = "Open Usage Access Settings",
+            onAction = {
+                val i = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(i)
+            }
+        )
+        !hasOverlay -> PermissionWallScreen(
+            modifier = modifier,
+            icon = "🪟",
+            title = "Draw Over Other Apps",
+            description = "DALE needs to display the lock screen on top of other apps.\n\nFind \"DALE\" and turn on \"Allow display over other apps\".",
+            buttonText = "Open Overlay Settings",
+            onAction = {
+                val i = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    "package:${context.packageName}".toUri()
+                )
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(i)
+            }
+        )
+        !hasBattery -> PermissionWallScreen(
+            modifier = modifier,
+            icon = "🔋",
+            title = "Disable Battery Optimization",
+            description = "Battery optimization can kill DALE's background service, making the lock screen stop working.\n\nTap the button below — you'll be taken directly to DALE's battery settings. Select \"Unrestricted\" or \"Don't optimize\".",
+            buttonText = "Open Battery Settings for DALE",
+            onAction = {
+                // Go directly to the app-specific battery optimization page
+                try {
+                    val i = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = "package:${context.packageName}".toUri()
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(i)
+                } catch (_: Exception) {
+                    // Fallback: open general battery optimization list
+                    MonitorStartupHelper.openBatteryOptimizationSettings(context)
+                }
+            }
+        )
+        else -> HomeScreen(modifier = modifier, activity = activity)
+    }
+}
+
+@Composable
+fun PermissionWallScreen(
+    modifier: Modifier = Modifier,
+    icon: String,
+    title: String,
+    description: String,
+    buttonText: String,
+    onAction: () -> Unit
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                    colors = listOf(Color(0xFF1a1a2e), Color(0xFF16213e))
+                )
+            )
+            .padding(horizontal = 28.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            // Icon
+            Text(text = icon, fontSize = 56.sp)
+
+            // Title
+            Text(
+                text = title,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+
+            // Divider
+            Box(
+                modifier = Modifier
+                    .width(60.dp)
+                    .height(3.dp)
+                    .background(Purple80, RoundedCornerShape(2.dp))
+            )
+
+            // Description
+            Text(
+                text = description,
+                fontSize = 14.sp,
+                color = Color(0xFFB0BEC5),
+                lineHeight = 22.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Action button
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Purple80, RoundedCornerShape(12.dp))
+                    .clickable(onClick = onAction)
+                    .padding(vertical = 16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = buttonText,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF1a1a2e)
+                )
+            }
+
+            // Note
+            Text(
+                text = "DALE will not function correctly without this permission.",
+                fontSize = 11.sp,
+                color = Color(0xFF546E7A),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        }
     }
 }
 
@@ -124,10 +282,8 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
     val sharedPrefs = SharedPreferencesManager.getInstance(activity as ComponentActivity)
     val allGroups = remember { mutableStateOf(sharedPrefs.getAllAppGroups()) }
     var refreshTrigger by remember { mutableStateOf(0) }
+    var protectionActive by remember { mutableStateOf(false) }
 
-    val showUsagePermissionDialog = remember { mutableStateOf(false) }
-    val showOverlayPermissionDialog = remember { mutableStateOf(false) }
-    val showBatteryOptimizationDialog = remember { mutableStateOf(false) }
     var isMenuOpen by remember { mutableStateOf(false) }
     var showDestroyConfirmation by remember { mutableStateOf(false) }
     var showDestroyingScreen by remember { mutableStateOf(false) }
@@ -150,90 +306,9 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
         }
     }
 
-    // Check permissions and refresh monitor start whenever the screen resumes.
+    // Ensure service keeps running and expose a small status on home screen.
     LaunchedEffect(refreshTrigger) {
-        val hasUsageAccess = MonitorStartupHelper.hasUsageStatsPermission(context)
-        val hasOverlayPermission = MonitorStartupHelper.hasOverlayPermission(context)
-        val isBatteryOptimizationDisabled = MonitorStartupHelper.isIgnoringBatteryOptimizations(context)
-
-        if (hasUsageAccess && hasOverlayPermission) {
-            MonitorStartupHelper.startMonitoringService(context)
-        }
-
-        showUsagePermissionDialog.value = !hasUsageAccess
-        showOverlayPermissionDialog.value = hasUsageAccess && !hasOverlayPermission
-        showBatteryOptimizationDialog.value = hasUsageAccess && hasOverlayPermission && !isBatteryOptimizationDisabled
-    }
-
-    // Usage Stats Permission Dialog
-    if (showUsagePermissionDialog.value) {
-        AlertDialog(
-            onDismissRequest = { showUsagePermissionDialog.value = false },
-            title = { Text("Usage Access Required") },
-            text = { Text("DALE needs usage access permission to monitor and lock apps. Please grant this permission in the next screen.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showUsagePermissionDialog.value = false
-                    val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
-                    context.startActivity(intent)
-                }) {
-                    Text("Grant Permission")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showUsagePermissionDialog.value = false }) {
-                    Text("Later")
-                }
-            }
-        )
-    }
-
-    // Overlay Permission Dialog
-    if (showOverlayPermissionDialog.value) {
-        AlertDialog(
-            onDismissRequest = { showOverlayPermissionDialog.value = false },
-            title = { Text("Draw Over Other Apps") },
-            text = { Text("DALE needs permission to display lock screen over other apps. Please enable this in settings.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showOverlayPermissionDialog.value = false
-                    val intent = Intent(
-                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        "package:${context.packageName}".toUri()
-                    )
-                    context.startActivity(intent)
-                }) {
-                    Text("Grant Permission")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showOverlayPermissionDialog.value = false }) {
-                    Text("Later")
-                }
-            }
-        )
-    }
-
-    // Battery Optimization Dialog
-    if (showBatteryOptimizationDialog.value) {
-        AlertDialog(
-            onDismissRequest = { showBatteryOptimizationDialog.value = false },
-            title = { Text("Turn Off Battery Optimization") },
-            text = { Text("DALE should be excluded from battery optimization so protection keeps running reliably in the background.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showBatteryOptimizationDialog.value = false
-                    MonitorStartupHelper.openBatteryOptimizationSettings(context)
-                }) {
-                    Text("Open Battery Settings")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showBatteryOptimizationDialog.value = false }) {
-                    Text("Later")
-                }
-            }
-        )
+        protectionActive = MonitorStartupHelper.startMonitoringIfPossible(context)
     }
 
     // Destroy Confirmation Dialog
@@ -272,10 +347,7 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
     if (showDestroyingScreen) {
         DestroyingLoadingScreen(
             onComplete = {
-                // Clear all app data
                 sharedPrefs.clearAllData()
-
-                // Navigate back to welcome screen
                 activity?.let {
                     val intent = Intent(it, WelcomeActivity::class.java)
                     intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -284,7 +356,7 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
                 }
             }
         )
-        return // Don't render the rest of the UI
+        return
     }
 
     Box(
@@ -292,10 +364,7 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
             .fillMaxSize()
             .background(
                 brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF1a1a2e),
-                        Color(0xFF16213e)
-                    )
+                    colors = listOf(Color(0xFF1a1a2e), Color(0xFF16213e))
                 )
             )
     ) {
@@ -325,13 +394,31 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
                     )
                 }
 
-                // DALE Title moved to right
-                Text(
-                    text = "DALE",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
+                // DALE title + small protection status
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "DALE",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .background(
+                                if (protectionActive) Color(0xFF1B5E20) else Color(0xFF7f0000),
+                                RoundedCornerShape(6.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = if (protectionActive) "Protection ON" else "Protection OFF",
+                            fontSize = 10.sp,
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
             }
 
             // "All Groups" header section
