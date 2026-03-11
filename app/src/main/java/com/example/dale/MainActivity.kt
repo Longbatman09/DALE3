@@ -381,30 +381,25 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Menu Icon
-                IconButton(
-                    onClick = { isMenuOpen = !isMenuOpen },
-                    modifier = Modifier.size(40.dp)
+                // Left side: Menu + protection status
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Menu,
-                        contentDescription = "Menu",
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
+                    IconButton(
+                        onClick = { isMenuOpen = !isMenuOpen },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = "Menu",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
 
-                // DALE title + small protection status
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = "DALE",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
                     Box(
                         modifier = Modifier
-                            .padding(top = 2.dp)
                             .background(
                                 if (protectionActive) Color(0xFF1B5E20) else Color(0xFF7f0000),
                                 RoundedCornerShape(6.dp)
@@ -419,6 +414,14 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
                         )
                     }
                 }
+
+                // Right side: DALE title
+                Text(
+                    text = "DALE",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
             }
 
             // "All Groups" header section
