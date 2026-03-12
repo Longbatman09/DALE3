@@ -106,15 +106,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Restart service whenever returning, in case it was killed
-        MonitorStartupHelper.startMonitoringIfPossible(this)
+        // Restart service when returning only if user has protection enabled.
+        val prefs = SharedPreferencesManager.getInstance(this)
+        if (prefs.isProtectionEnabled()) {
+            MonitorStartupHelper.startMonitoringIfPossible(this)
+        } else {
+            MonitorStartupHelper.stopMonitoringService(this)
+        }
     }
 }
 
 @Composable
 fun MainGate(modifier: Modifier = Modifier, activity: ComponentActivity) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var hasUsage by remember { mutableStateOf(MonitorStartupHelper.hasUsageStatsPermission(context)) }
+    var hasAccessibility by remember { mutableStateOf(MonitorStartupHelper.isAccessibilityServiceEnabled(context)) }
     var hasOverlay by remember { mutableStateOf(MonitorStartupHelper.hasOverlayPermission(context)) }
     var hasBattery by remember { mutableStateOf(MonitorStartupHelper.isIgnoringBatteryOptimizations(context)) }
     var refreshKey by remember { mutableIntStateOf(0) }
@@ -131,29 +136,16 @@ fun MainGate(modifier: Modifier = Modifier, activity: ComponentActivity) {
     }
 
     LaunchedEffect(refreshKey) {
-        hasUsage = MonitorStartupHelper.hasUsageStatsPermission(context)
+        hasAccessibility = MonitorStartupHelper.isAccessibilityServiceEnabled(context)
         hasOverlay = MonitorStartupHelper.hasOverlayPermission(context)
         hasBattery = MonitorStartupHelper.isIgnoringBatteryOptimizations(context)
 
-        // Start lock monitor immediately when core permissions are available.
-        if (hasUsage && hasOverlay) {
-            MonitorStartupHelper.startMonitoringService(context)
+        if (hasOverlay) {
+            MonitorStartupHelper.startMonitoringIfPossible(context)
         }
     }
 
     when {
-        !hasUsage -> PermissionWallScreen(
-            modifier = modifier,
-            icon = "📊",
-            title = "Usage Access Required",
-            description = "DALE needs to monitor which apps are open so it can show the lock screen at the right time.\n\nFind \"DALE\" in the list and enable \"Permit usage access\".",
-            buttonText = "Open Usage Access Settings",
-            onAction = {
-                val i = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(i)
-            }
-        )
         !hasOverlay -> PermissionWallScreen(
             modifier = modifier,
             icon = "🪟",
@@ -167,6 +159,16 @@ fun MainGate(modifier: Modifier = Modifier, activity: ComponentActivity) {
                 )
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 context.startActivity(i)
+            }
+        )
+        !hasAccessibility -> PermissionWallScreen(
+            modifier = modifier,
+            icon = "♿",
+            title = "Enable Accessibility Service",
+            description = "DALE now uses accessibility-based app detection for reliable lock triggering.\n\nOpen accessibility settings and enable DALE.",
+            buttonText = "Open Accessibility Settings",
+            onAction = {
+                MonitorStartupHelper.openAccessibilitySettings(context)
             }
         )
         !hasBattery -> PermissionWallScreen(
@@ -184,7 +186,6 @@ fun MainGate(modifier: Modifier = Modifier, activity: ComponentActivity) {
                     }
                     context.startActivity(i)
                 } catch (_: Exception) {
-                    // Fallback: open general battery optimization list
                     MonitorStartupHelper.openBatteryOptimizationSettings(context)
                 }
             }
@@ -279,14 +280,16 @@ fun PermissionWallScreen(
 @Composable
 fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = null) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val sharedPrefs = SharedPreferencesManager.getInstance(activity as ComponentActivity)
+    val hostActivity = activity as? ComponentActivity ?: return
+    val sharedPrefs = SharedPreferencesManager.getInstance(hostActivity)
     val allGroups = remember { mutableStateOf(sharedPrefs.getAllAppGroups()) }
     var refreshTrigger by remember { mutableStateOf(0) }
-    var protectionActive by remember { mutableStateOf(false) }
-
     var isMenuOpen by remember { mutableStateOf(false) }
     var showDestroyConfirmation by remember { mutableStateOf(false) }
     var showDestroyingScreen by remember { mutableStateOf(false) }
+    var protectionActive by remember { mutableStateOf(false) }
+    var protectionEnabled by remember { mutableStateOf(sharedPrefs.isProtectionEnabled()) }
+    var showProtectionDisableConfirmation by remember { mutableStateOf(false) }
 
     // Refresh groups when screen is visible
     LaunchedEffect(refreshTrigger) {
@@ -306,9 +309,50 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
         }
     }
 
-    // Ensure service keeps running and expose a small status on home screen.
-    LaunchedEffect(refreshTrigger) {
-        protectionActive = MonitorStartupHelper.startMonitoringIfPossible(context)
+    // Ensure service keeps running (if enabled) and expose a small status on home screen.
+    LaunchedEffect(refreshTrigger, protectionEnabled) {
+        protectionEnabled = sharedPrefs.isProtectionEnabled()
+        protectionActive = if (protectionEnabled) {
+            MonitorStartupHelper.startMonitoringIfPossible(context)
+        } else {
+            MonitorStartupHelper.stopMonitoringService(context)
+            false
+        }
+    }
+
+    // Confirmation dialog for turning protection off
+    if (showProtectionDisableConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showProtectionDisableConfirmation = false },
+            title = {
+                Text(
+                    text = "Turn protection OFF?",
+                    color = Color(0xFF2A0C0C),
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text("We are stopping lock-screen services. Apps in groups will no longer be protected until protection is turned back ON.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showProtectionDisableConfirmation = false
+                        sharedPrefs.setProtectionEnabled(false)
+                        protectionEnabled = false
+                        protectionActive = false
+                        MonitorStartupHelper.stopMonitoringService(context)
+                    }
+                ) {
+                    Text("Turn OFF", color = Color(0xFFFF5252), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showProtectionDisableConfirmation = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     // Destroy Confirmation Dialog
@@ -404,6 +448,15 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
                                 if (protectionActive) Color(0xFF1B5E20) else Color(0xFF7f0000),
                                 RoundedCornerShape(6.dp)
                             )
+                            .clickable {
+                                if (protectionEnabled) {
+                                    showProtectionDisableConfirmation = true
+                                } else {
+                                    sharedPrefs.setProtectionEnabled(true)
+                                    protectionEnabled = true
+                                    protectionActive = MonitorStartupHelper.startMonitoringIfPossible(context)
+                                }
+                            }
                             .padding(horizontal = 8.dp, vertical = 2.dp)
                     ) {
                         Text(

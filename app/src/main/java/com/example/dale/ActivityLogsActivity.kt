@@ -7,7 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -125,9 +126,11 @@ fun ActivityLogsScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(items = logs, key = { it.timestamp + it.packageName }) { log ->
+                    itemsIndexed(items = logs, key = { index, log ->
+                        "${log.timestamp}-${log.packageName}-${log.event}-$index"
+                    }) { _, log ->
                         ActivityLogItem(log)
                     }
                 }
@@ -138,53 +141,31 @@ fun ActivityLogsScreen(
 
 @Composable
 fun ActivityLogItem(log: ActivityLogEntry) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0f3460))
+    val lineColor = if (log.event == "OPENED") {
+        Color(0x332ECC71)
+    } else {
+        Color(0x33E74C3C)
+    }
+
+    val textColor = if (log.event == "OPENED") {
+        Color(0xFF8DF6B5)
+    } else {
+        Color(0xFFFFA3A3)
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(lineColor, RoundedCornerShape(4.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(
-                modifier = Modifier
-                    .size(42.dp)
-                    .background(
-                        color = if (log.event == "OPENED") Color(0xFF1B5E20) else Color(0xFF7f0000),
-                        shape = RoundedCornerShape(6.dp)
-                    ),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = if (log.event == "OPENED") "▶" else "■",
-                    fontSize = 16.sp,
-                    color = Color.White
-                )
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = log.appName,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White
-                )
-                Text(
-                    text = log.event,
-                    fontSize = 11.sp,
-                    color = if (log.event == "OPENED") Color(0xFF81C784) else Color(0xFFEF9A9A),
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            }
-            Text(
-                text = log.timestamp,
-                fontSize = 11.sp,
-                color = Color.Gray
-            )
-        }
+        Text(
+            text = "[${log.timestamp}] ${log.event}: ${log.appName}",
+            fontSize = 12.sp,
+            color = textColor,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1
+        )
     }
 }

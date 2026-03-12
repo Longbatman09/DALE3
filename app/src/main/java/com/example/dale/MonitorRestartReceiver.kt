@@ -13,9 +13,12 @@ class MonitorRestartReceiver : BroadcastReceiver() {
             Intent.ACTION_MY_PACKAGE_REPLACED -> {
                 val sharedPrefs = SharedPreferencesManager.getInstance(context)
                 if (!sharedPrefs.isSetupCompleted()) return
+                if (!sharedPrefs.isProtectionEnabled()) {
+                    MonitorStartupHelper.stopMonitoringService(context)
+                    return
+                }
                 MonitorStartupHelper.startMonitoringIfPossible(context)
             }
         }
     }
 }
-

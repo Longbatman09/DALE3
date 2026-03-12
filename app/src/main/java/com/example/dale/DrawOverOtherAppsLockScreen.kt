@@ -36,6 +36,9 @@ import com.example.dale.ui.theme.Purple80
 import com.example.dale.utils.SharedPreferencesManager
 import kotlinx.coroutines.delay
 import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class DrawOverOtherAppsLockScreen : ComponentActivity() {
 
@@ -48,6 +51,11 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (!SharedPreferencesManager.getInstance(this).isProtectionEnabled()) {
+            finishAndRemoveTask()
+            return
+        }
 
         // Keep screen awake and visible while lock screen is active.
         window.addFlags(
@@ -116,6 +124,8 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
                 putExtra("GROUP_ID", currentGroupId)
             })
 
+            recordAppOpenedLog(currentGroupId, packageName)
+
             try {
                 val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
                 if (launchIntent != null) {
@@ -128,6 +138,40 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
 
             finishAndRemoveTask()
         }, 250)
+    }
+
+    private fun recordAppOpenedLog(groupId: String?, openedPackage: String) {
+        val targetGroupId = groupId ?: return
+
+        val sharedPrefs = SharedPreferencesManager.getInstance(this)
+        val group = sharedPrefs.getAppGroup(targetGroupId) ?: return
+
+        val appName = when (openedPackage) {
+            group.app1PackageName -> group.app1Name
+            group.app2PackageName -> group.app2Name
+            else -> {
+                try {
+                    packageManager.getApplicationLabel(
+                        packageManager.getApplicationInfo(openedPackage, 0)
+                    ).toString()
+                } catch (_: Exception) {
+                    openedPackage
+                }
+            }
+        }
+
+        val timestamp = SimpleDateFormat("dd MMM yyyy, HH:mm:ss", Locale.getDefault())
+            .format(Date())
+
+        sharedPrefs.saveActivityLog(
+            groupId = targetGroupId,
+            entry = ActivityLogEntry(
+                appName = appName,
+                packageName = openedPackage,
+                event = "OPENED",
+                timestamp = timestamp
+            )
+        )
     }
 
     private fun dismissToHome() {
@@ -181,6 +225,13 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
             putExtra("GROUP_ID", groupId)
         }
         startActivity(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!SharedPreferencesManager.getInstance(this).isProtectionEnabled()) {
+            finishAndRemoveTask()
+        }
     }
 
     companion object {

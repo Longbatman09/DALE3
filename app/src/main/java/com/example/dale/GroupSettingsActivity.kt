@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -92,7 +93,12 @@ fun GroupSettingsScreen(
             else -> null
         }
     }
-    val screenTitle = group?.groupName ?: groupName
+
+    val resolvedGroupName = when {
+        !group?.groupName.isNullOrBlank() -> group.groupName
+        groupName.isNotBlank() -> groupName
+        else -> "Unknown Group"
+    }
 
     val showAppSelection = remember { mutableStateOf(false) }
     val showDeleteConfirmation = remember { mutableStateOf(false) }
@@ -133,13 +139,26 @@ fun GroupSettingsScreen(
                 }
 
                 Text(
-                    text = screenTitle,
+                    text = "Group Settings",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     modifier = Modifier.padding(start = 8.dp)
                 )
             }
+
+            Text(
+                text = resolvedGroupName,
+                fontSize = 13.sp,
+                color = Color.Gray,
+                modifier = Modifier.padding(start = 16.dp, top = 10.dp, bottom = 4.dp)
+            )
+
+            HorizontalDivider(
+                color = Color(0xFF0f3460),
+                thickness = 1.dp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
 
             // Settings Options
             if (group != null) {
@@ -489,4 +508,3 @@ fun DestroyingLoader(onComplete: () -> Unit) {
         }
     }
 }
-

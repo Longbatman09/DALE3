@@ -18,6 +18,14 @@ class SharedPreferencesManager private constructor(context: Context) {
     )
     private val gson = Gson()
 
+    fun isProtectionEnabled(): Boolean {
+        return sharedPreferences.getBoolean(KEY_PROTECTION_ENABLED, true)
+    }
+
+    fun setProtectionEnabled(enabled: Boolean) {
+        sharedPreferences.edit().putBoolean(KEY_PROTECTION_ENABLED, enabled).apply()
+    }
+
     fun setSetupCompleted(completed: Boolean) {
         sharedPreferences.edit().putBoolean(KEY_SETUP_COMPLETED, completed).apply()
     }
@@ -142,6 +150,7 @@ class SharedPreferencesManager private constructor(context: Context) {
     companion object {
         private const val PREFS_NAME = "DALE_PREFS"
         private const val KEY_SETUP_COMPLETED = "setup_completed"
+        private const val KEY_PROTECTION_ENABLED = "protection_enabled"
 
         @Volatile
         private var instance: SharedPreferencesManager? = null

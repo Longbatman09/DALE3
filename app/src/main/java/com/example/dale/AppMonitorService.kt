@@ -18,6 +18,9 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.dale.utils.SharedPreferencesManager
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class AppMonitorService : Service() {
 
@@ -115,6 +118,12 @@ class AppMonitorService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+
+        if (!SharedPreferencesManager.getInstance(this).isProtectionEnabled()) {
+            stopSelf()
+            return
+        }
+
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification())
 
@@ -128,6 +137,10 @@ class AppMonitorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!SharedPreferencesManager.getInstance(this).isProtectionEnabled()) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         startPolling()
         return START_STICKY
     }
@@ -156,6 +169,11 @@ class AppMonitorService : Service() {
     }
 
     private fun pollForegroundApp() {
+        if (!SharedPreferencesManager.getInstance(this).isProtectionEnabled()) {
+            stopSelf()
+            return
+        }
+
         refreshProtectedPackageMapIfNeeded()
 
         if (protectedPackageToGroupId.isEmpty()) {
@@ -328,8 +346,13 @@ class AppMonitorService : Service() {
         val now = System.currentTimeMillis()
 
         if (previous !in unlockingApps) {
-            backgroundSince.putIfAbsent(previous, now)
-            Log.d(TAG, "Protected app moved to background: $previous")
+            val insertedAt = backgroundSince.putIfAbsent(previous, now)
+            if (insertedAt == null) {
+                protectedPackageToGroupId[previous]?.let { groupId ->
+                    saveActivityLog(groupId, previous, "CLOSED")
+                }
+                Log.d(TAG, "Protected app moved to background: $previous")
+            }
         }
         lockInProgress.remove(previous)
         lastForegroundPackage = null
@@ -343,7 +366,12 @@ class AppMonitorService : Service() {
 
         if (previous != null && previous != currentPackage && previous != packageName) {
             if (previous !in unlockingApps) {
-                backgroundSince.putIfAbsent(previous, now)
+                val insertedAt = backgroundSince.putIfAbsent(previous, now)
+                if (insertedAt == null) {
+                    protectedPackageToGroupId[previous]?.let { previousGroupId ->
+                        saveActivityLog(previousGroupId, previous, "CLOSED")
+                    }
+                }
             }
             lockInProgress.remove(previous)
         }
@@ -455,6 +483,7 @@ class AppMonitorService : Service() {
     }
 
     private fun showLockScreen(packageName: String, groupId: String) {
+        if (!SharedPreferencesManager.getInstance(this).isProtectionEnabled()) return
         if (packageName == this.packageName) return
 
         val intent = Intent(this, DrawOverOtherAppsLockScreen::class.java).apply {
@@ -490,6 +519,30 @@ class AppMonitorService : Service() {
             .setOngoing(true)
             .setSilent(true)
             .build()
+    }
+
+    private fun saveActivityLog(groupId: String, packageName: String, event: String) {
+        val sharedPrefs = SharedPreferencesManager.getInstance(this)
+        val group = sharedPrefs.getAppGroup(groupId) ?: return
+
+        val appName = when (packageName) {
+            group.app1PackageName -> group.app1Name
+            group.app2PackageName -> group.app2Name
+            else -> packageName
+        }
+
+        val timestamp = SimpleDateFormat("dd MMM yyyy, HH:mm:ss", Locale.getDefault())
+            .format(Date())
+
+        sharedPrefs.saveActivityLog(
+            groupId = groupId,
+            entry = ActivityLogEntry(
+                appName = appName,
+                packageName = packageName,
+                event = event,
+                timestamp = timestamp
+            )
+        )
     }
 
     companion object {

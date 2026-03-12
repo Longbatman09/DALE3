@@ -40,16 +40,75 @@ object MonitorStartupHelper {
         return powerManager.isIgnoringBatteryOptimizations(context.packageName)
     }
 
+    fun isAccessibilityServiceEnabled(context: Context): Boolean {
+        val expectedService = "${context.packageName}/${com.example.dale.AppLockAccessibilityService::class.java.name}"
+        val enabledServices = Settings.Secure.getString(
+            context.contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ) ?: return false
+
+        return enabledServices
+            .split(':')
+            .any { it.equals(expectedService, ignoreCase = true) }
+    }
+
+    fun openBatteryOptimizationSettings(context: Context) {
+        val batterySettingsIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val appDetailsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = "package:${context.packageName}".toUri()
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        startFirstResolvableActivity(context, listOf(batterySettingsIntent, appDetailsIntent))
+    }
+
+    fun openAccessibilitySettings(context: Context) {
+        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            context.startActivity(intent)
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to open accessibility settings", t)
+        }
+    }
+
     fun canStartMonitoring(context: Context): Boolean {
-        // Core lock-screen requirements
-        return hasUsageStatsPermission(context) && hasOverlayPermission(context)
+        val sharedPrefs = SharedPreferencesManager.getInstance(context)
+        if (!sharedPrefs.isProtectionEnabled() || !hasOverlayPermission(context)) return false
+
+        // Accessibility is the primary detection method.
+        return isAccessibilityServiceEnabled(context) || hasUsageStatsPermission(context)
     }
 
     fun startMonitoringIfPossible(context: Context): Boolean {
-        if (!canStartMonitoring(context)) {
-            Log.d(TAG, "Skipping monitor start: usage/overlay permissions missing")
+        val sharedPrefs = SharedPreferencesManager.getInstance(context)
+        if (!sharedPrefs.isProtectionEnabled()) {
+            stopMonitoringService(context)
+            Log.d(TAG, "Skipping monitor start: protection toggle is OFF")
             return false
         }
+
+        if (!hasOverlayPermission(context)) {
+            Log.d(TAG, "Skipping monitor start: overlay permission missing")
+            stopMonitoringService(context)
+            return false
+        }
+
+        if (isAccessibilityServiceEnabled(context)) {
+            // Accessibility backend is active; avoid duplicate lock triggers from monitor polling.
+            stopMonitoringService(context)
+            Log.d(TAG, "Accessibility backend active; monitor fallback stopped")
+            return true
+        }
+
+        if (!hasUsageStatsPermission(context)) {
+            Log.d(TAG, "Skipping monitor start: usage permission missing and accessibility disabled")
+            return false
+        }
+
         startMonitoringService(context)
         return true
     }
@@ -63,16 +122,12 @@ object MonitorStartupHelper {
         }
     }
 
-    fun openBatteryOptimizationSettings(context: Context) {
-        val batterySettingsIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    fun stopMonitoringService(context: Context) {
+        try {
+            context.stopService(Intent(context, AppMonitorService::class.java))
+        } catch (t: Throwable) {
+            Log.e(TAG, "Unable to stop AppMonitorService", t)
         }
-        val appDetailsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = "package:${context.packageName}".toUri()
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-
-        startFirstResolvableActivity(context, listOf(batterySettingsIntent, appDetailsIntent))
     }
 
     private fun startFirstResolvableActivity(context: Context, intents: List<Intent>) {
