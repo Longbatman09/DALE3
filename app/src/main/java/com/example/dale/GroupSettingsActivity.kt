@@ -27,7 +27,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
@@ -132,7 +132,7 @@ fun GroupSettingsScreen(
             ) {
                 IconButton(onClick = { activity.finish() }) {
                     Icon(
-                        imageVector = Icons.Default.ArrowBack,
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
                         tint = Color.White
                     )
@@ -185,6 +185,19 @@ fun GroupSettingsScreen(
                         icon = Icons.Default.Settings,
                         onClick = {
                             val intent = Intent(activity, AppLogsActivity::class.java)
+                            intent.putExtra("GROUP_ID", group.id)
+                            intent.putExtra("GROUP_NAME", group.groupName)
+                            activity.startActivity(intent)
+                        }
+                    )
+
+                    // Customisation Option
+                    SettingsCard(
+                        title = "Customisation",
+                        subtitle = "Screen lock type and appearance",
+                        icon = Icons.Default.Settings,
+                        onClick = {
+                            val intent = Intent(activity, CustomisationActivity::class.java)
                             intent.putExtra("GROUP_ID", group.id)
                             intent.putExtra("GROUP_NAME", group.groupName)
                             activity.startActivity(intent)
