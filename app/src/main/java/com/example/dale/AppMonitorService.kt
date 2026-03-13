@@ -90,6 +90,10 @@ class AppMonitorService : Service() {
                         backgroundSince.remove(destinationPackage)
                         unlockTimestamps[sourcePackage] = now
                         unlockTimestamps[destinationPackage] = now
+                        // Immediately mark destination as an unlocked session so
+                        // the monitor never re-shows the lock screen for it.
+                        unlockedSessions.add(destinationPackage)
+                        unlockingApps.add(destinationPackage)
                         Log.d(TAG, "Cross-unlock broadcast completed: $sourcePackage -> $destinationPackage")
                     } else {
                         unlockingApps.remove(destinationPackage)
@@ -403,7 +407,8 @@ class AppMonitorService : Service() {
         }
 
         if (pendingCrossUnlocks.values.any { handoff ->
-                handoff.sourcePackage == currentPackage && now - handoff.createdAt < crossUnlockSuppressMs
+                (handoff.sourcePackage == currentPackage || handoff.destinationPackage == currentPackage)
+                    && now - handoff.createdAt < crossUnlockSuppressMs
             }) {
             lastForegroundPackage = currentPackage
             backgroundSince.remove(currentPackage)

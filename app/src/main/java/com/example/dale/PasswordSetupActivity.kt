@@ -117,6 +117,22 @@ class PasswordSetupActivity : ComponentActivity() {
         }
     }
 
+    // Save hashed credential for specific app index (1 or 2)
+    fun saveCredentialForApp(groupId: String, appIndex: Int, authType: String, rawCredential: String) {
+        val sharedPrefsManager = SharedPreferencesManager.getInstance(this)
+        val appGroup = sharedPrefsManager.getAppGroup(groupId)
+        if (appGroup != null) {
+            val hashedCredential = hashPin(rawCredential)
+            val normalizedType = authType.uppercase()
+            val newGroup = when (appIndex) {
+                1 -> appGroup.copy(app1LockPin = hashedCredential, app1LockType = normalizedType, isLocked = true)
+                2 -> appGroup.copy(app2LockPin = hashedCredential, app2LockType = normalizedType, isLocked = true)
+                else -> appGroup
+            }
+            sharedPrefsManager.saveAppGroup(newGroup)
+        }
+    }
+
     fun proceedToOverlayPermission(groupId: String) {
         // Request overlay permission if not already granted
         if (!Settings.canDrawOverlays(this)) {
@@ -175,7 +191,7 @@ fun PasswordSetupScreen(
     val overlayAllowed = remember { mutableStateOf(overlayAllowedInitial) }
     
     // Store the first app's PIN temporarily to compare with the second
-    val firstAppPin = remember { mutableStateOf<String?>(null) }
+    val firstAppCredential = remember { mutableStateOf<String?>(null) }
 
     // resetKey forces PinEntryScreen recomposition when changed
     val resetKey = remember { mutableStateOf(0) }
@@ -261,24 +277,26 @@ fun PasswordSetupScreen(
                     // Show Pin entry for the current target app
                     val appName = if (targetAppIndex.value == 1) app1Name.value else app2Name.value
                     // Use key with resetKey and target index to force a fresh PinEntryScreen when switching
-                    key(resetKey.value, targetAppIndex.value) {
-                        PinEntryScreen(
+                    key(resetKey.value, targetAppIndex.value, selectedAuthType.value) {
+                        CredentialEntryScreen(
                             authType = selectedAuthType.value ?: "PIN",
                             forAppName = appName,
-                            forbiddenPin = if (targetAppIndex.value == 2) firstAppPin.value else null,
-                            onPinConfirmed = { pin ->
-                                // Save pin for app
-                                (activity as? PasswordSetupActivity)?.savePinForApp(groupId, targetAppIndex.value, pin)
+                            forbiddenCredential = if (targetAppIndex.value == 2) firstAppCredential.value else null,
+                            onCredentialConfirmed = { credential ->
+                                val authType = selectedAuthType.value ?: "PIN"
+                                (activity as? PasswordSetupActivity)?.saveCredentialForApp(
+                                    groupId = groupId,
+                                    appIndex = targetAppIndex.value,
+                                    authType = authType,
+                                    rawCredential = credential
+                                )
+
                                 if (targetAppIndex.value == 1) {
-                                    firstAppPin.value = pin
-                                    // move to set PIN for app 2 without toggling selection (avoid glitch)
+                                    firstAppCredential.value = credential
                                     targetAppIndex.value = 2
-                                    // bump resetKey to force recollection of PinEntryScreen internal remembers
                                     resetKey.value = resetKey.value + 1
-                                    // ensure selectedAuthType stays PIN so the flow continues
-                                    selectedAuthType.value = "PIN"
+                                    selectedAuthType.value = authType
                                 } else {
-                                    // both pins set -> show overlay permission dialog if needed
                                     if (!overlayAllowed.value) {
                                         showOverlayDialog.value = true
                                     } else {
@@ -290,7 +308,7 @@ fun PasswordSetupScreen(
                                 // go back to auth selection
                                 selectedAuthType.value = null
                                 targetAppIndex.value = 1
-                                firstAppPin.value = null
+                                firstAppCredential.value = null
                             }
                         )
                     }
@@ -335,10 +353,10 @@ fun AuthenticationTypeSelection(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         val authTypes = listOf(
-            AuthType("PIN", "4-6 digit PIN", "🔐", enabled = true),
-            AuthType("PASSWORD", "Alphanumeric password", "🔒", enabled = false),
-            AuthType("PATTERN", "Draw a pattern", "✏️", enabled = false),
-            AuthType("BIOMETRICS", "Fingerprint/Face ID", "👆", enabled = false)
+            AuthType("PIN", "4 digit PIN", "PIN", enabled = true),
+            AuthType("PASSWORD", "Alphanumeric password", "PWD", enabled = true),
+            AuthType("PATTERN", "Draw a pattern", "PAT", enabled = false),
+            AuthType("BIOMETRICS", "Fingerprint/Face ID", "BIO", enabled = false)
         )
 
         authTypes.forEach { authType ->
@@ -370,9 +388,7 @@ fun AuthenticationTypeSelectionCard(
             .then(if (authType.enabled) Modifier.clickable { onSelected() } else Modifier)
             .alpha(if (authType.enabled) 1f else 0.45f),
         shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = Color(0xFF2a2a3e)
-        )
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF2a2a3e))
     ) {
         Row(
             modifier = Modifier
@@ -381,9 +397,7 @@ fun AuthenticationTypeSelectionCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = authType.name,
                     fontSize = 15.sp,
@@ -399,51 +413,56 @@ fun AuthenticationTypeSelectionCard(
             }
             Text(
                 text = authType.icon,
-                fontSize = 22.sp,
-                modifier = Modifier.padding(start = 12.dp)
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 12.dp),
+                color = Color.White
             )
         }
     }
 }
 
 @Composable
-fun PinEntryScreen(
+fun CredentialEntryScreen(
     authType: String = "PIN",
     forAppName: String = "App",
-    forbiddenPin: String? = null,
-    onPinConfirmed: (String) -> Unit = {},
+    forbiddenCredential: String? = null,
+    onCredentialConfirmed: (String) -> Unit = {},
     onBackToSelection: () -> Unit = {}
 ) {
-    val pinInput = remember { mutableStateOf("") }
-    val pinConfirm = remember { mutableStateOf("") }
-    val step = remember { mutableStateOf(0) } // 0: Enter PIN, 1: Confirm PIN
+    val isPinMode = authType.uppercase() == "PIN"
+    val minLength = if (isPinMode) 4 else 6
+    val maxLength = if (isPinMode) 4 else 32
+
+    val firstInput = remember { mutableStateOf("") }
+    val confirmInput = remember { mutableStateOf("") }
+    val step = remember { mutableStateOf(0) }
     val errorMessage = remember { mutableStateOf("") }
 
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    val currentPin = if (step.value == 0) pinInput.value else pinConfirm.value
-    val isButtonEnabled = currentPin.length >= 4
+    val currentState = if (step.value == 0) firstInput else confirmInput
+    val currentValue = currentState.value
+    val isButtonEnabled = currentValue.length >= minLength
 
     Column(
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Top content area
         Column(
             modifier = Modifier
                 .weight(1f)
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Back button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = { onBackToSelection() }) {
+                IconButton(onClick = onBackToSelection) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
@@ -452,9 +471,12 @@ fun PinEntryScreen(
                 }
             }
 
-            // Step indicator
             Text(
-                text = if (step.value == 0) "Enter PIN for $forAppName" else "Confirm PIN for $forAppName",
+                text = if (step.value == 0) {
+                    "Enter ${if (isPinMode) "PIN" else "Password"} for $forAppName"
+                } else {
+                    "Confirm ${if (isPinMode) "PIN" else "Password"} for $forAppName"
+                },
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF9575CD),
@@ -462,7 +484,6 @@ fun PinEntryScreen(
                 modifier = Modifier.padding(bottom = 6.dp)
             )
 
-            // Step counter
             Text(
                 text = "Step ${step.value + 1} of 2",
                 fontSize = 12.sp,
@@ -470,13 +491,13 @@ fun PinEntryScreen(
                 modifier = Modifier.padding(bottom = 18.dp)
             )
 
-            // PIN Display
-            PinDisplayBox(
-                pin = currentPin,
-                modifier = Modifier.padding(bottom = 18.dp)
-            )
+            if (isPinMode) {
+                PinDisplayBox(
+                    pin = currentValue,
+                    modifier = Modifier.padding(bottom = 18.dp)
+                )
+            }
 
-            // Error message
             if (errorMessage.value.isNotEmpty()) {
                 Text(
                     text = errorMessage.value,
@@ -487,60 +508,64 @@ fun PinEntryScreen(
                 )
             }
 
-            // Use system numeric keyboard via an OutlinedTextField (hidden text)
-            val currentPinState = if (step.value == 0) pinInput else pinConfirm
-
             OutlinedTextField(
-                value = currentPinState.value,
+                value = currentState.value,
                 onValueChange = { value ->
-                    // allow only digits and limit to 4
-                    val filtered = value.filter { it.isDigit() }.take(4)
-                    currentPinState.value = filtered
+                    currentState.value = if (isPinMode) {
+                        value.filter { it.isDigit() }.take(maxLength)
+                    } else {
+                        value.take(maxLength)
+                    }
                 },
                 visualTransformation = PasswordVisualTransformation(),
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = if (isPinMode) KeyboardType.NumberPassword else KeyboardType.Password,
+                    imeAction = ImeAction.Done
+                ),
+                label = { Text(if (isPinMode) "4 digit PIN" else "Password (min 6 chars)") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp)
                     .focusRequester(focusRequester)
-                    .alpha(0f) // hide the actual field visually
+                    .alpha(if (isPinMode) 0f else 1f)
             )
 
-            // ensure keyboard opens when screen appears
-            androidx.compose.runtime.LaunchedEffect(Unit) {
-                delay(150)
+            androidx.compose.runtime.LaunchedEffect(step.value, isPinMode) {
+                delay(120)
                 focusRequester.requestFocus()
                 keyboardController?.show()
             }
         }
 
-        // Continue Button at the bottom
         Button(
             onClick = {
                 when {
                     step.value == 0 -> {
-                        // Check if this PIN is forbidden (same as the other app) right at Step 1
-                        if (forbiddenPin != null && currentPin == forbiddenPin) {
-                            errorMessage.value = "Same PIN cant be used for 2 apps"
-                            pinInput.value = ""
+                        if (forbiddenCredential != null && currentValue == forbiddenCredential) {
+                            errorMessage.value = if (isPinMode) {
+                                "Same PIN cant be used for 2 apps"
+                            } else {
+                                "Same password cant be used for 2 apps"
+                            }
+                            firstInput.value = ""
                         } else {
-                            // Move to confirmation step
                             step.value = 1
                             errorMessage.value = ""
                         }
                     }
                     step.value == 1 -> {
-                        // Verify PINs match
-                        if (pinInput.value == pinConfirm.value) {
-                            // PINs match, proceed (Forbidden check already done in Step 0)
-                            onPinConfirmed(pinInput.value)
+                        if (firstInput.value == confirmInput.value) {
+                            onCredentialConfirmed(firstInput.value)
                         } else {
-                            errorMessage.value = "PINs do not match. Please try again."
-                            // Reset to first step
+                            errorMessage.value = if (isPinMode) {
+                                "PINs do not match. Please try again."
+                            } else {
+                                "Passwords do not match. Please try again."
+                            }
                             step.value = 0
-                            pinInput.value = ""
-                            pinConfirm.value = ""
+                            firstInput.value = ""
+                            confirmInput.value = ""
                         }
                     }
                 }
@@ -578,9 +603,7 @@ fun PinDisplayBox(
             .height(72.dp)
             .shadow(elevation = 8.dp, shape = RoundedCornerShape(12.dp)),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = Color(0xFF2a2a3e)
-        )
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF2a2a3e))
     ) {
         Box(
             modifier = Modifier
@@ -592,9 +615,7 @@ fun PinDisplayBox(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                repeat(4) { index ->
-                    PinDot(isFilled = index < pin.length)
-                }
+                repeat(4) { index -> PinDot(isFilled = index < pin.length) }
             }
         }
     }

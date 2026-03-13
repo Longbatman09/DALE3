@@ -8,6 +8,7 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.OnBackPressedCallback
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -27,6 +28,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -35,6 +37,7 @@ import com.example.dale.ui.theme.Purple40
 import com.example.dale.ui.theme.Purple80
 import com.example.dale.utils.SharedPreferencesManager
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -51,6 +54,13 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Consume system back; only top-right arrow should dismiss.
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                // no-op
+            }
+        })
 
         if (!SharedPreferencesManager.getInstance(this).isProtectionEnabled()) {
             finishAndRemoveTask()
@@ -84,7 +94,8 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
                         groupId = groupId,
                         onUnlockSuccess = { unlockApp(it) },
                         onUnlockFail = { /* Handle fail */ },
-                        onDismissRequested = { dismissToHome() }
+                        onDismissRequested = { dismissToHome() },
+                        onVerified = { isPinVerified = true }
                     )
                 }
             }
@@ -186,10 +197,6 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
         finishAndRemoveTask()
     }
 
-    override fun onBackPressed() {
-        // Ignore system/navigation back; only top-right arrow can dismiss.
-    }
-
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         if (!isPinVerified && !isDismissing) {
@@ -246,14 +253,16 @@ fun LockScreenContent(
     groupId: String?,
     onUnlockSuccess: (String) -> Unit,
     onUnlockFail: () -> Unit,
-    onDismissRequested: () -> Unit
+    onDismissRequested: () -> Unit,
+    onVerified: () -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val sharedPrefs = SharedPreferencesManager.getInstance(context)
 
-    var pin by remember { mutableStateOf("") }
+    var credentialInput by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isVerifying by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     val appGroup = remember(groupId) {
         groupId?.let { sharedPrefs.getAppGroup(it) }
@@ -261,57 +270,70 @@ fun LockScreenContent(
 
     val appInfo = remember(appGroup, targetPackageName) {
         when {
-            appGroup == null -> Triple("Unknown App", "", "")
+            appGroup == null -> LockTarget("", "", "PIN")
             targetPackageName == appGroup.app1PackageName ->
-                Triple(appGroup.app1Name, appGroup.app1PackageName, appGroup.app1LockPin)
+                LockTarget(appGroup.app1PackageName, appGroup.app1LockPin, appGroup.app1LockType)
             targetPackageName == appGroup.app2PackageName ->
-                Triple(appGroup.app2Name, appGroup.app2PackageName, appGroup.app2LockPin)
-            else -> Triple("Unknown App", "", "")
+                LockTarget(appGroup.app2PackageName, appGroup.app2LockPin, appGroup.app2LockType)
+            else -> LockTarget("", "", "PIN")
         }
     }
 
-    val (appName, appPackage, correctPin) = appInfo
+    val isPinMode = appInfo.lockType.uppercase() != "PASSWORD"
 
-    LaunchedEffect(pin) {
-        if (pin.length == 4) {
-            isVerifying = true
-            delay(300)
+    suspend fun verifyAndUnlock() {
+        if (isVerifying) return
+        if (isPinMode && credentialInput.length != 4) return
+        if (!isPinMode && credentialInput.length < 6) return
 
-            // Hash the entered PIN for comparison
-            val hashedPin = MessageDigest.getInstance("SHA-256")
-                .digest(pin.toByteArray())
-                .joinToString("") { "%02x".format(it) }
+        isVerifying = true
+        delay(150)
 
-            if (hashedPin == correctPin) {
-                errorMessage = null
-                onUnlockSuccess(appPackage)
-            } else {
-                // Check if user entered the other app's PIN
-                val otherAppPin = when (appPackage) {
-                    appGroup?.app1PackageName -> appGroup.app2LockPin
-                    appGroup?.app2PackageName -> appGroup.app1LockPin
-                    else -> null
-                }
+        val hashedInput = MessageDigest.getInstance("SHA-256")
+            .digest(credentialInput.toByteArray())
+            .joinToString("") { "%02x".format(it) }
 
-                val otherAppPackage = when (appPackage) {
-                    appGroup?.app1PackageName -> appGroup.app2PackageName
-                    appGroup?.app2PackageName -> appGroup.app1PackageName
-                    else -> null
-                }
-
-                if (otherAppPin != null && hashedPin == otherAppPin && otherAppPackage != null) {
-                    // User entered the other app's PIN - open that app instead
-                    errorMessage = null
-                    onUnlockSuccess(otherAppPackage)
-                } else {
-                    errorMessage = "Incorrect PIN"
-                    delay(500)
-                    pin = ""
-                    onUnlockFail()
-                }
-            }
-
+        if (hashedInput == appInfo.lockHash) {
+            errorMessage = null
+            onVerified()
+            onUnlockSuccess(appInfo.appPackage)
             isVerifying = false
+            return
+        }
+
+        val otherAppHash = when (appInfo.appPackage) {
+            appGroup?.app1PackageName -> appGroup.app2LockPin
+            appGroup?.app2PackageName -> appGroup.app1LockPin
+            else -> null
+        }
+        val otherAppType = when (appInfo.appPackage) {
+            appGroup?.app1PackageName -> appGroup.app2LockType
+            appGroup?.app2PackageName -> appGroup.app1LockType
+            else -> null
+        }
+        val otherAppPackage = when (appInfo.appPackage) {
+            appGroup?.app1PackageName -> appGroup.app2PackageName
+            appGroup?.app2PackageName -> appGroup.app1PackageName
+            else -> null
+        }
+
+        if (otherAppHash != null && otherAppPackage != null && otherAppType == appInfo.lockType && hashedInput == otherAppHash) {
+            errorMessage = null
+            onVerified()
+            onUnlockSuccess(otherAppPackage)
+        } else {
+            errorMessage = if (isPinMode) "Incorrect PIN" else "Incorrect password"
+            delay(420)
+            credentialInput = ""
+            onUnlockFail()
+        }
+
+        isVerifying = false
+    }
+
+    LaunchedEffect(credentialInput, isPinMode) {
+        if (isPinMode && credentialInput.length == 4) {
+            verifyAndUnlock()
         }
     }
 
@@ -364,35 +386,49 @@ fun LockScreenContent(
 
             // Title
             Text(
-                text = "Enter PIN",
+                text = if (isPinMode) "Enter PIN" else "Enter Password",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = Purple80,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
-            // PIN Display (dots)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 48.dp, vertical = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                repeat(4) { index ->
-                    Box(
-                        modifier = Modifier
-                            .size(16.dp)
-                            .shadow(
-                                elevation = if (index < pin.length) 4.dp else 0.dp,
-                                shape = androidx.compose.foundation.shape.CircleShape
-                            )
-                            .background(
-                                color = if (index < pin.length) Purple80 else Color(0xFF3a4b5d),
-                                shape = androidx.compose.foundation.shape.CircleShape
-                            )
-                    )
+            if (isPinMode) {
+                // PIN Display (dots)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 48.dp, vertical = 24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    repeat(4) { index ->
+                        Box(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .shadow(
+                                    elevation = if (index < credentialInput.length) 4.dp else 0.dp,
+                                    shape = androidx.compose.foundation.shape.CircleShape
+                                )
+                                .background(
+                                    color = if (index < credentialInput.length) Purple80 else Color(0xFF3a4b5d),
+                                    shape = androidx.compose.foundation.shape.CircleShape
+                                )
+                        )
+                    }
                 }
+            } else {
+                OutlinedTextField(
+                    value = credentialInput,
+                    onValueChange = { credentialInput = it.take(32) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    label = { Text("Password") },
+                    enabled = !isVerifying,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 16.dp)
+                )
             }
 
             // Error Message
@@ -412,71 +448,95 @@ fun LockScreenContent(
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // Number Pad
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Rows 1-3 (numbers 1-9)
-                for (row in 0..2) {
+            if (isPinMode) {
+                // Number Pad
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Rows 1-3 (numbers 1-9)
+                    for (row in 0..2) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            for (col in 1..3) {
+                                val number = (row * 3) + col
+                                NumberButton(
+                                    number = number.toString(),
+                                    onClick = {
+                                        if (credentialInput.length < 4 && !isVerifying) {
+                                            credentialInput += number
+                                            errorMessage = null
+                                        }
+                                    },
+                                    enabled = !isVerifying
+                                )
+                            }
+                        }
+                    }
+
+                    // Last row (empty, 0, backspace)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        for (col in 1..3) {
-                            val number = (row * 3) + col
-                            NumberButton(
-                                number = number.toString(),
-                                onClick = {
-                                    if (pin.length < 4 && !isVerifying) {
-                                        pin += number
-                                        errorMessage = null
-                                    }
-                                },
-                                enabled = !isVerifying
-                            )
-                        }
+                        // Empty space
+                        Spacer(modifier = Modifier.size(80.dp).padding(8.dp))
+
+                        // Zero
+                        NumberButton(
+                            number = "0",
+                            onClick = {
+                                if (credentialInput.length < 4 && !isVerifying) {
+                                    credentialInput += "0"
+                                    errorMessage = null
+                                }
+                            },
+                            enabled = !isVerifying
+                        )
+
+                        // Backspace
+                        NumberButton(
+                            number = "⌫",
+                            onClick = {
+                                if (credentialInput.isNotEmpty() && !isVerifying) {
+                                    credentialInput = credentialInput.dropLast(1)
+                                    errorMessage = null
+                                }
+                            },
+                            enabled = !isVerifying
+                        )
                     }
                 }
-
-                // Last row (empty, 0, backspace)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center
+            } else {
+                Button(
+                    onClick = {
+                        if (!isVerifying) {
+                            errorMessage = null
+                            scope.launch { verifyAndUnlock() }
+                        }
+                    },
+                    enabled = credentialInput.length >= 6 && !isVerifying,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .padding(bottom = 20.dp)
                 ) {
-                    // Empty space
-                    Spacer(modifier = Modifier.size(80.dp).padding(8.dp))
-
-                    // Zero
-                    NumberButton(
-                        number = "0",
-                        onClick = {
-                            if (pin.length < 4 && !isVerifying) {
-                                pin += "0"
-                                errorMessage = null
-                            }
-                        },
-                        enabled = !isVerifying
-                    )
-
-                    // Backspace
-                    NumberButton(
-                        number = "⌫",
-                        onClick = {
-                            if (pin.isNotEmpty() && !isVerifying) {
-                                pin = pin.dropLast(1)
-                                errorMessage = null
-                            }
-                        },
-                        enabled = !isVerifying
-                    )
+                    Text("Unlock")
                 }
             }
         }
     }
 }
+
+private data class LockTarget(
+    val appPackage: String,
+    val lockHash: String,
+    val lockType: String
+)
 
 @Composable
 fun NumberButton(

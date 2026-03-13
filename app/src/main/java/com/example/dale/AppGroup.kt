@@ -10,5 +10,7 @@ data class AppGroup(
     val isLocked: Boolean = false,
     val app1LockPin: String = "",
     val app2LockPin: String = "",
+    val app1LockType: String = "PIN",
+    val app2LockType: String = "PIN",
     val createdAt: Long = System.currentTimeMillis()
 )
