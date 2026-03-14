@@ -147,10 +147,19 @@ class SharedPreferencesManager private constructor(context: Context) {
         }
     }
 
+    fun isIntroShown(): Boolean {
+        return sharedPreferences.getBoolean(KEY_INTRO_SHOWN, false)
+    }
+
+    fun setIntroShown(shown: Boolean) {
+        sharedPreferences.edit().putBoolean(KEY_INTRO_SHOWN, shown).apply()
+    }
+
     companion object {
         private const val PREFS_NAME = "DALE_PREFS"
         private const val KEY_SETUP_COMPLETED = "setup_completed"
         private const val KEY_PROTECTION_ENABLED = "protection_enabled"
+        private const val KEY_INTRO_SHOWN = "intro_shown"
 
         @Volatile
         private var instance: SharedPreferencesManager? = null
