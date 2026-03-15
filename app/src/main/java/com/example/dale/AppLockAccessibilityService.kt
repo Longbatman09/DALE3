@@ -197,6 +197,10 @@ class AppLockAccessibilityService : AccessibilityService() {
         }
 
         if (currentPackage !in lockInProgress) {
+            if (!shouldTriggerLockFromLastActivity(groupId, currentPackage)) {
+                lockInProgress.remove(currentPackage)
+                return
+            }
             lockInProgress.add(currentPackage)
             showLockScreen(currentPackage, groupId)
         }
@@ -264,6 +268,15 @@ class AppLockAccessibilityService : AccessibilityService() {
                 timestamp = timestamp
             )
         )
+    }
+
+    private fun shouldTriggerLockFromLastActivity(groupId: String, packageName: String): Boolean {
+        val latestEvent = sharedPrefs.getLatestActivityEventForPackage(groupId, packageName)
+        val shouldTrigger = latestEvent == null || latestEvent == "CLOSED"
+        if (!shouldTrigger) {
+            Log.d(TAG, "Lock suppressed for $packageName; latest activity event=$latestEvent")
+        }
+        return shouldTrigger
     }
 
     companion object {

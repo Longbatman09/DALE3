@@ -459,10 +459,24 @@ class AppMonitorService : Service() {
         }
 
         if (currentPackage !in lockInProgress) {
+            if (!shouldTriggerLockFromLastActivity(groupId, currentPackage)) {
+                lockInProgress.remove(currentPackage)
+                return
+            }
             lockInProgress.add(currentPackage)
             Log.d(TAG, "Launching lock screen for: $currentPackage")
             showLockScreen(currentPackage, groupId)
         }
+    }
+
+    private fun shouldTriggerLockFromLastActivity(groupId: String, packageName: String): Boolean {
+        val latestEvent = SharedPreferencesManager.getInstance(this)
+            .getLatestActivityEventForPackage(groupId, packageName)
+        val shouldTrigger = latestEvent == null || latestEvent == "CLOSED"
+        if (!shouldTrigger) {
+            Log.d(TAG, "Lock suppressed for $packageName; latest activity event=$latestEvent")
+        }
+        return shouldTrigger
     }
 
     private fun cleanupExpiredUnlockTimestamps(now: Long) {

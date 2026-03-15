@@ -81,6 +81,13 @@ class SharedPreferencesManager private constructor(context: Context) {
         return try { gson.fromJson(json, type) } catch (e: Exception) { emptyList() }
     }
 
+    fun getLatestActivityEventForPackage(groupId: String, packageName: String): String? {
+        return getActivityLogs(groupId)
+            .firstOrNull { it.packageName == packageName }
+            ?.event
+            ?.uppercase(Locale.ROOT)
+    }
+
     fun clearActivityLogs(groupId: String) {
         sharedPreferences.edit().remove("activity_logs_$groupId").apply()
     }
