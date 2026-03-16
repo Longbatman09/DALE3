@@ -72,6 +72,7 @@ import com.example.dale.utils.SharedPreferencesManager
 import android.content.pm.ResolveInfo
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
+import java.util.Locale
 
 class AppSelectionActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -216,6 +217,8 @@ class AppSelectionActivity : ComponentActivity() {
     }
 }
 
+private const val MAX_GROUP_NAME_LENGTH = 30
+
 @Composable
 fun AppSelectionScreenWithLoading(
     modifier: Modifier = Modifier,
@@ -329,10 +332,21 @@ fun AppSelectionScreen(
     val app1 = remember { mutableStateOf<AppInfo?>(null) }
     val app2 = remember { mutableStateOf<AppInfo?>(null) }
     val groupName = remember { mutableStateOf("") }
+    val groupNameNeedsManualEntry = remember { mutableStateOf(false) }
     val stepTransitionDurationMs = 450
 
     // Category filter state: 0 -> Installed, 1 -> System
     val selectedCategory = remember { mutableStateOf(0) }
+
+    val existingNormalizedGroupNames = remember(activity) {
+        activity
+            ?.let { SharedPreferencesManager.getInstance(it).getAllAppGroups() }
+            .orEmpty()
+            .mapNotNull { group ->
+                group.groupName.trim().takeIf { it.isNotEmpty() }?.lowercase(Locale.ROOT)
+            }
+            .toSet()
+    }
 
     val usedPackagesToGroupName = remember(activity) {
         val groups = activity?.let { SharedPreferencesManager.getInstance(it).getAllAppGroups() }.orEmpty()
@@ -397,6 +411,18 @@ fun AppSelectionScreen(
                     apps = appsToShow.filter { it.packageName != app1.value?.packageName },
                     onAppSelected = { selectedApp ->
                         app2.value = selectedApp
+                        if (groupName.value.trim().isEmpty()) {
+                            val app1Name = app1.value?.appName?.trim().orEmpty()
+                            val app2Name = selectedApp.appName.trim()
+                            val autoName = "$app1Name+$app2Name"
+                            if (autoName.length <= MAX_GROUP_NAME_LENGTH) {
+                                groupName.value = autoName
+                                groupNameNeedsManualEntry.value = false
+                            } else {
+                                groupName.value = ""
+                                groupNameNeedsManualEntry.value = true
+                            }
+                        }
                         selectionState.value = 2
                     },
                     onBack = { selectionState.value = 0 },
@@ -409,23 +435,29 @@ fun AppSelectionScreen(
                     app2 = app2.value,
                     groupName = groupName.value,
                     onGroupNameChange = { groupName.value = it },
+                    existingNormalizedGroupNames = existingNormalizedGroupNames,
+                    showDefaultNameTooLongHint = groupNameNeedsManualEntry.value,
                     onConfirm = {
-                        val appGroup = AppGroup(
-                            id = System.currentTimeMillis().toString(),
-                            groupName = groupName.value.ifEmpty { "${app1.value?.appName} + ${app2.value?.appName}" },
-                            app1PackageName = app1.value?.packageName ?: "",
-                            app1Name = app1.value?.appName ?: "",
-                            app2PackageName = app2.value?.packageName ?: "",
-                            app2Name = app2.value?.appName ?: ""
-                        )
+                        val normalizedGroupName = groupName.value.trim()
+                        val normalizedLookupKey = normalizedGroupName.lowercase(Locale.ROOT)
+                        if (normalizedGroupName.isNotEmpty() && normalizedLookupKey !in existingNormalizedGroupNames) {
+                            val appGroup = AppGroup(
+                                id = System.currentTimeMillis().toString(),
+                                groupName = normalizedGroupName,
+                                app1PackageName = app1.value?.packageName ?: "",
+                                app1Name = app1.value?.appName ?: "",
+                                app2PackageName = app2.value?.packageName ?: "",
+                                app2Name = app2.value?.appName ?: ""
+                            )
 
-                        SharedPreferencesManager.getInstance(activity!!).saveAppGroup(appGroup)
+                            SharedPreferencesManager.getInstance(activity!!).saveAppGroup(appGroup)
 
-                        val intent = Intent(activity, LockScreenSetupActivity::class.java)
-                        intent.putExtra("groupId", appGroup.id)
-                        activity.startActivity(intent)
-                        activity.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
-                        activity.finish()
+                            val intent = Intent(activity, LockScreenSetupActivity::class.java)
+                            intent.putExtra("groupId", appGroup.id)
+                            activity.startActivity(intent)
+                            activity.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                            activity.finish()
+                        }
                     },
                     onBack = { selectionState.value = 1 }
                 )
@@ -662,9 +694,17 @@ fun GroupNameScreen(
     app2: AppInfo?,
     groupName: String,
     onGroupNameChange: (String) -> Unit,
+    existingNormalizedGroupNames: Set<String> = emptySet(),
+    showDefaultNameTooLongHint: Boolean = false,
     onConfirm: () -> Unit,
     onBack: () -> Unit
 ) {
+    val trimmedGroupName = groupName.trim()
+    val normalizedLookupKey = trimmedGroupName.lowercase(Locale.ROOT)
+    val isBlankName = trimmedGroupName.isEmpty()
+    val isDuplicateName = normalizedLookupKey in existingNormalizedGroupNames
+    val isGroupNameValid = !isBlankName && !isDuplicateName
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -767,7 +807,7 @@ fun GroupNameScreen(
 
         // Group Name Input
         Text(
-            text = "Enter Group Name (Optional)",
+            text = "Enter Group Name",
             fontSize = 14.sp,
             color = Color(0xFFB0B0B0),
             modifier = Modifier
@@ -777,13 +817,13 @@ fun GroupNameScreen(
 
         TextField(
             value = groupName,
-            onValueChange = onGroupNameChange,
+            onValueChange = { onGroupNameChange(it.take(MAX_GROUP_NAME_LENGTH)) },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 24.dp),
+                .padding(bottom = 8.dp),
             placeholder = {
                 Text(
-                    text = "${app1?.appName} + ${app2?.appName}",
+                    text = "Type group name",
                     color = Color(0xFF666666)
                 )
             },
@@ -800,9 +840,46 @@ fun GroupNameScreen(
             singleLine = true
         )
 
+        Text(
+            text = "${groupName.length}/$MAX_GROUP_NAME_LENGTH",
+            color = Color(0xFFB0B0B0),
+            fontSize = 12.sp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp),
+            textAlign = TextAlign.End
+        )
+
+        if (isBlankName) {
+            Text(
+                text = if (showDefaultNameTooLongHint) {
+                    "Default name is too long. Please enter a custom name (max 30 characters)."
+                } else {
+                    "Group name cannot be blank"
+                },
+                color = Color(0xFFFF6B6B),
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp)
+            )
+        } else if (isDuplicateName) {
+            Text(
+                text = "Group name already exists",
+                color = Color(0xFFFF6B6B),
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp)
+            )
+        } else {
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
         // Confirm Button
         Button(
             onClick = onConfirm,
+            enabled = isGroupNameValid,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
@@ -812,7 +889,8 @@ fun GroupNameScreen(
                 ),
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFF4CAF50)
+                containerColor = Color(0xFF4CAF50),
+                disabledContainerColor = Color(0xFF2E5E36)
             )
         ) {
             Row(

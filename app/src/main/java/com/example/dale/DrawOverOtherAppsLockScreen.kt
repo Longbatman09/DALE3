@@ -119,6 +119,13 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
 
         val sourcePackage = targetPackageName
         val currentGroupId = groupId
+        val crossUnlockSource = sourcePackage?.takeIf { it.isNotBlank() && it != packageName }
+        val isCrossUnlock = crossUnlockSource != null
+
+        // For cross-unlock, first app is explicitly closed/backgrounded before opening app 2.
+        if (isCrossUnlock) {
+            closeSourceAppBeforeCrossUnlock(crossUnlockSource, currentGroupId)
+        }
 
         // Mark unlock transition immediately.
         sendBroadcast(Intent(AppMonitorService.ACTION_APP_UNLOCKING).apply {
@@ -148,7 +155,17 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
             }
 
             finishAndRemoveTask()
-        }, 250)
+        }, if (isCrossUnlock) 320 else 250)
+    }
+
+    private fun closeSourceAppBeforeCrossUnlock(sourcePackage: String, groupId: String?) {
+        recordAppClosedLog(groupId, sourcePackage)
+
+        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(homeIntent)
     }
 
     private fun recordAppOpenedLog(groupId: String?, openedPackage: String) {
@@ -180,6 +197,40 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
                 appName = appName,
                 packageName = openedPackage,
                 event = "OPENED",
+                timestamp = timestamp
+            )
+        )
+    }
+
+    private fun recordAppClosedLog(groupId: String?, closedPackage: String) {
+        val targetGroupId = groupId ?: return
+
+        val sharedPrefs = SharedPreferencesManager.getInstance(this)
+        val group = sharedPrefs.getAppGroup(targetGroupId) ?: return
+
+        val appName = when (closedPackage) {
+            group.app1PackageName -> group.app1Name
+            group.app2PackageName -> group.app2Name
+            else -> {
+                try {
+                    packageManager.getApplicationLabel(
+                        packageManager.getApplicationInfo(closedPackage, 0)
+                    ).toString()
+                } catch (_: Exception) {
+                    closedPackage
+                }
+            }
+        }
+
+        val timestamp = SimpleDateFormat("dd MMM yyyy, HH:mm:ss", Locale.getDefault())
+            .format(Date())
+
+        sharedPrefs.saveActivityLog(
+            groupId = targetGroupId,
+            entry = ActivityLogEntry(
+                appName = appName,
+                packageName = closedPackage,
+                event = "CLOSED",
                 timestamp = timestamp
             )
         )
