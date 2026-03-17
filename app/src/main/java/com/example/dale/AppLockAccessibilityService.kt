@@ -132,12 +132,7 @@ class AppLockAccessibilityService : AccessibilityService() {
     private fun handleNoProtectedForeground(currentPackage: String) {
         val previous = lastForegroundPackage
         if (previous != null && previous != currentPackage && previous !in unlockingApps) {
-            val previousGroupId = protectedPackageToGroupId[previous]
-            val insertedAt = backgroundSince.putIfAbsent(previous, System.currentTimeMillis())
-            if (insertedAt == null && previousGroupId != null) {
-                saveActivityLog(previousGroupId, previous, "CLOSED")
-            }
-            lockInProgress.remove(previous)
+            markProtectedAppClosed(previous, System.currentTimeMillis(), "no_protected_foreground")
         }
         if (currentPackage != this.packageName) {
             lastForegroundPackage = null
@@ -149,14 +144,7 @@ class AppLockAccessibilityService : AccessibilityService() {
         val previous = lastForegroundPackage
 
         if (previous != null && previous != currentPackage && previous != packageName) {
-            if (previous !in unlockingApps) {
-                val previousGroupId = protectedPackageToGroupId[previous]
-                val insertedAt = backgroundSince.putIfAbsent(previous, now)
-                if (insertedAt == null && previousGroupId != null) {
-                    saveActivityLog(previousGroupId, previous, "CLOSED")
-                }
-            }
-            lockInProgress.remove(previous)
+            markProtectedAppClosed(previous, now, "foreground_switch")
         }
 
         lastForegroundPackage = currentPackage
@@ -175,25 +163,42 @@ class AppLockAccessibilityService : AccessibilityService() {
         }
 
         if (currentPackage in unlockingApps) {
-            backgroundSince.remove(currentPackage)
-            lockInProgress.remove(currentPackage)
-            return
+            val unlockAt = unlockTimestamps[currentPackage]
+            val isRecentUnlocking = unlockAt != null && (now - unlockAt) < unlockGracePeriodMs
+            if (isRecentUnlocking) {
+                backgroundSince.remove(currentPackage)
+                lockInProgress.remove(currentPackage)
+                return
+            }
+
+            clearSessionStateForPackage(currentPackage)
+            Log.d(TAG, "Cleared stale unlocking state for $currentPackage")
         }
 
         if (currentPackage in unlockedSessions) {
+            val latestEvent = sharedPrefs.getLatestActivityEventForPackage(groupId, currentPackage)
+            if (latestEvent != "OPENED") {
+                clearSessionStateForPackage(currentPackage)
+                Log.d(TAG, "Forced relock for $currentPackage due to latestEvent=$latestEvent")
+            }
+
             val leftAt = backgroundSince[currentPackage]
             if (leftAt == null) {
-                return
+                if (currentPackage in unlockedSessions) {
+                    return
+                }
             }
 
-            val awayDuration = now - leftAt
-            if (awayDuration < exitGracePeriodMs) {
+            if (leftAt != null) {
+                val awayDuration = now - leftAt
+                if (awayDuration < exitGracePeriodMs) {
+                    backgroundSince.remove(currentPackage)
+                    return
+                }
+
+                unlockedSessions.remove(currentPackage)
                 backgroundSince.remove(currentPackage)
-                return
             }
-
-            unlockedSessions.remove(currentPackage)
-            backgroundSince.remove(currentPackage)
         }
 
         if (currentPackage !in lockInProgress) {
@@ -277,6 +282,28 @@ class AppLockAccessibilityService : AccessibilityService() {
             Log.d(TAG, "Lock suppressed for $packageName; latest activity event=$latestEvent")
         }
         return shouldTrigger
+    }
+
+    private fun markProtectedAppClosed(pkg: String, closedAtMs: Long, reason: String) {
+        if (pkg in unlockingApps) return
+
+        val insertedAt = backgroundSince.putIfAbsent(pkg, closedAtMs)
+        if (insertedAt == null) {
+            protectedPackageToGroupId[pkg]?.let { groupId ->
+                saveActivityLog(groupId, pkg, "CLOSED")
+                Log.d(TAG, "Logged CLOSED for $pkg (reason=$reason)")
+            }
+            unlockedSessions.remove(pkg)
+        }
+        lockInProgress.remove(pkg)
+    }
+
+    private fun clearSessionStateForPackage(pkg: String) {
+        unlockingApps.remove(pkg)
+        unlockedSessions.remove(pkg)
+        backgroundSince.remove(pkg)
+        lockInProgress.remove(pkg)
+        unlockTimestamps.remove(pkg)
     }
 
     companion object {

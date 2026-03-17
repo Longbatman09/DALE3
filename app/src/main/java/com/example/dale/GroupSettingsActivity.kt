@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -37,6 +38,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -58,6 +61,7 @@ import com.example.dale.ui.theme.DALETheme
 import com.example.dale.ui.theme.Purple80
 import com.example.dale.utils.SharedPreferencesManager
 import kotlinx.coroutines.delay
+import java.util.Locale
 
 class GroupSettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -86,16 +90,18 @@ fun GroupSettingsScreen(
     activity: ComponentActivity
 ) {
     val sharedPrefs = SharedPreferencesManager.getInstance(activity)
-    val group = remember(groupId, groupName) {
+    var group by remember(groupId, groupName) { mutableStateOf(
         when {
             groupId.isNotBlank() -> sharedPrefs.getAppGroup(groupId)
             groupName.isNotBlank() -> sharedPrefs.getAllAppGroups().firstOrNull { it.groupName == groupName }
             else -> null
         }
-    }
+    ) }
+
+    val currentGroup = group
 
     val resolvedGroupName = when {
-        !group?.groupName.isNullOrBlank() -> group.groupName
+        !currentGroup?.groupName.isNullOrBlank() -> currentGroup?.groupName.orEmpty()
         groupName.isNotBlank() -> groupName
         else -> "Unknown Group"
     }
@@ -103,6 +109,7 @@ fun GroupSettingsScreen(
     val showAppSelection = remember { mutableStateOf(false) }
     val showDeleteConfirmation = remember { mutableStateOf(false) }
     val showDestroyingLoader = remember { mutableStateOf(false) }
+    val showRenameDialog = remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -161,7 +168,7 @@ fun GroupSettingsScreen(
             )
 
             // Settings Options
-            if (group != null) {
+            if (currentGroup != null) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -178,6 +185,13 @@ fun GroupSettingsScreen(
                         onClick = { showAppSelection.value = true }
                     )
 
+                    SettingsCard(
+                        title = "Change Group Name",
+                        subtitle = "Rename this group",
+                        icon = Icons.Default.Edit,
+                        onClick = { showRenameDialog.value = true }
+                    )
+
                     // App Logs Option
                     SettingsCard(
                         title = "App Logs",
@@ -185,8 +199,8 @@ fun GroupSettingsScreen(
                         icon = Icons.Default.Settings,
                         onClick = {
                             val intent = Intent(activity, AppLogsActivity::class.java)
-                            intent.putExtra("GROUP_ID", group.id)
-                            intent.putExtra("GROUP_NAME", group.groupName)
+                            intent.putExtra("GROUP_ID", currentGroup.id)
+                            intent.putExtra("GROUP_NAME", currentGroup.groupName)
                             activity.startActivity(intent)
                         }
                     )
@@ -198,8 +212,8 @@ fun GroupSettingsScreen(
                         icon = Icons.Default.Settings,
                         onClick = {
                             val intent = Intent(activity, CustomisationActivity::class.java)
-                            intent.putExtra("GROUP_ID", group.id)
-                            intent.putExtra("GROUP_NAME", group.groupName)
+                            intent.putExtra("GROUP_ID", currentGroup.id)
+                            intent.putExtra("GROUP_NAME", currentGroup.groupName)
                             activity.startActivity(intent)
                         }
                     )
@@ -231,19 +245,31 @@ fun GroupSettingsScreen(
         }
 
         // App Selection Dialog
-        if (showAppSelection.value && group != null) {
+        if (showAppSelection.value && currentGroup != null) {
             AppSelectionDialog(
-                group = group,
+                group = currentGroup,
                 activity = activity,
                 onDismiss = { showAppSelection.value = false },
                 onAppSelected = { selectedApp ->
                     showAppSelection.value = false
                     // Navigate to password change screen
                     val intent = Intent(activity, ChangePasswordActivity::class.java)
-                    intent.putExtra("GROUP_ID", group.id)
-                    intent.putExtra("GROUP_NAME", group.groupName)
+                    intent.putExtra("GROUP_ID", currentGroup.id)
+                    intent.putExtra("GROUP_NAME", currentGroup.groupName)
                     intent.putExtra("APP_PACKAGE", selectedApp)
                     activity.startActivity(intent)
+                }
+            )
+        }
+
+        if (showRenameDialog.value && currentGroup != null) {
+            RenameGroupDialog(
+                currentGroup = currentGroup,
+                sharedPrefs = sharedPrefs,
+                onDismiss = { showRenameDialog.value = false },
+                onRenamed = { updatedGroup ->
+                    group = updatedGroup
+                    showRenameDialog.value = false
                 }
             )
         }
@@ -259,7 +285,7 @@ fun GroupSettingsScreen(
                     )
                 },
                 text = {
-                    Text("Are you sure you want to delete the group \"$groupName\"? This action cannot be undone.")
+                    Text("Are you sure you want to delete the group \"$resolvedGroupName\"? This action cannot be undone.")
                 },
                 confirmButton = {
                     TextButton(
@@ -293,6 +319,101 @@ fun GroupSettingsScreen(
             )
         }
     }
+}
+
+private const val MAX_GROUP_NAME_LENGTH = 30
+
+@Composable
+fun RenameGroupDialog(
+    currentGroup: AppGroup,
+    sharedPrefs: SharedPreferencesManager,
+    onDismiss: () -> Unit,
+    onRenamed: (AppGroup) -> Unit
+) {
+    var nameInput by remember(currentGroup.id, currentGroup.groupName) {
+        mutableStateOf(currentGroup.groupName)
+    }
+
+    val trimmedName = nameInput.trim()
+    val normalizedName = trimmedName.lowercase(Locale.ROOT)
+    val existingNames = remember(currentGroup.id) {
+        sharedPrefs.getAllAppGroups()
+            .asSequence()
+            .filter { it.id != currentGroup.id }
+            .mapNotNull { it.groupName.trim().takeIf { name -> name.isNotEmpty() }?.lowercase(Locale.ROOT) }
+            .toSet()
+    }
+
+    val isBlank = trimmedName.isEmpty()
+    val isDuplicate = normalizedName in existingNames
+    val isLengthValid = trimmedName.length <= MAX_GROUP_NAME_LENGTH
+    val isChanged = trimmedName != currentGroup.groupName.trim()
+    val canSave = !isBlank && !isDuplicate && isLengthValid && isChanged
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Change Group Name", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                TextField(
+                    value = nameInput,
+                    onValueChange = { nameInput = it.take(MAX_GROUP_NAME_LENGTH) },
+                    singleLine = true,
+                    placeholder = { Text("Enter group name") },
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFF0f3460),
+                        unfocusedContainerColor = Color(0xFF0a2940),
+                        focusedTextColor = Color(0xFFE0E0E0),
+                        unfocusedTextColor = Color(0xFFB0B0B0),
+                        cursorColor = Purple80
+                    )
+                )
+
+                Text(
+                    text = "${trimmedName.length}/$MAX_GROUP_NAME_LENGTH",
+                    color = Color(0xFFB0B0B0),
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.End
+                )
+
+                val errorText = when {
+                    isBlank -> "Group name cannot be blank"
+                    isDuplicate -> "Group name already exists"
+                    !isLengthValid -> "Maximum 30 characters"
+                    else -> null
+                }
+
+                if (errorText != null) {
+                    Text(
+                        text = errorText,
+                        color = Color(0xFFFF6B6B),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = canSave,
+                onClick = {
+                    val updatedGroup = currentGroup.copy(groupName = trimmedName)
+                    sharedPrefs.saveAppGroup(updatedGroup)
+                    onRenamed(updatedGroup)
+                }
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable

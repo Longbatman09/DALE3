@@ -46,6 +46,7 @@ class AppMonitorService : Service() {
 
     private val pendingCrossUnlocks = mutableMapOf<String, CrossUnlockHandoff>()
     private val crossUnlockSuppressMs = 5000L
+    private var lastUsageEventTimestamp = 0L
 
     private val unlockReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -137,6 +138,9 @@ class AppMonitorService : Service() {
         }
         ContextCompat.registerReceiver(this, unlockReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
 
+        // Start from "now" so stale historical usage events do not generate fake closes.
+        lastUsageEventTimestamp = System.currentTimeMillis()
+
         startPolling()
     }
 
@@ -212,27 +216,46 @@ class AppMonitorService : Service() {
             ?: return null
 
         val endTime = System.currentTimeMillis()
-        val startTime = endTime - usageWindowMs
+        val startTime = (lastUsageEventTimestamp - 250L).coerceAtLeast(endTime - usageWindowMs)
         val events = usageStatsManager.queryEvents(startTime, endTime)
         val event = UsageEvents.Event()
 
         var latestForegroundPackage: String? = null
         var latestTimestamp = Long.MIN_VALUE
+        var maxProcessedTimestamp = lastUsageEventTimestamp
 
         while (events.hasNextEvent()) {
             events.getNextEvent(event)
-            val eventType = event.eventType
-            val isForegroundEvent = eventType == UsageEvents.Event.MOVE_TO_FOREGROUND ||
-                eventType == UsageEvents.Event.ACTIVITY_RESUMED
-            if (!isForegroundEvent) continue
+            if (event.timeStamp <= lastUsageEventTimestamp) continue
 
+            if (event.timeStamp > maxProcessedTimestamp) {
+                maxProcessedTimestamp = event.timeStamp
+            }
+
+            val eventType = event.eventType
             val pkg = event.packageName ?: continue
             if (pkg == packageName) continue
+
+            val isForegroundEvent = eventType == UsageEvents.Event.MOVE_TO_FOREGROUND ||
+                eventType == UsageEvents.Event.ACTIVITY_RESUMED
+            val isBackgroundEvent = eventType == UsageEvents.Event.MOVE_TO_BACKGROUND ||
+                eventType == UsageEvents.Event.ACTIVITY_PAUSED ||
+                eventType == UsageEvents.Event.ACTIVITY_STOPPED
+
+            if (isBackgroundEvent && protectedPackages.contains(pkg)) {
+                markProtectedAppClosed(pkg, event.timeStamp, "usage_background")
+            }
+
+            if (!isForegroundEvent) continue
 
             if (event.timeStamp >= latestTimestamp) {
                 latestTimestamp = event.timeStamp
                 latestForegroundPackage = pkg
             }
+        }
+
+        if (maxProcessedTimestamp > lastUsageEventTimestamp) {
+            lastUsageEventTimestamp = maxProcessedTimestamp
         }
 
         val latestPkg = latestForegroundPackage ?: return null
@@ -349,16 +372,7 @@ class AppMonitorService : Service() {
         val previous = lastForegroundPackage ?: return
         val now = System.currentTimeMillis()
 
-        if (previous !in unlockingApps) {
-            val insertedAt = backgroundSince.putIfAbsent(previous, now)
-            if (insertedAt == null) {
-                protectedPackageToGroupId[previous]?.let { groupId ->
-                    saveActivityLog(groupId, previous, "CLOSED")
-                }
-                Log.d(TAG, "Protected app moved to background: $previous")
-            }
-        }
-        lockInProgress.remove(previous)
+        markProtectedAppClosed(previous, now, "no_protected_foreground")
         lastForegroundPackage = null
     }
 
@@ -369,15 +383,7 @@ class AppMonitorService : Service() {
         cleanupExpiredCrossUnlocks(now)
 
         if (previous != null && previous != currentPackage && previous != packageName) {
-            if (previous !in unlockingApps) {
-                val insertedAt = backgroundSince.putIfAbsent(previous, now)
-                if (insertedAt == null) {
-                    protectedPackageToGroupId[previous]?.let { previousGroupId ->
-                        saveActivityLog(previousGroupId, previous, "CLOSED")
-                    }
-                }
-            }
-            lockInProgress.remove(previous)
+            markProtectedAppClosed(previous, now, "foreground_switch")
         }
 
         val pendingCrossUnlock = pendingCrossUnlocks[currentPackage]
@@ -437,25 +443,45 @@ class AppMonitorService : Service() {
         }
 
         if (currentPackage in unlockingApps) {
-            backgroundSince.remove(currentPackage)
-            lockInProgress.remove(currentPackage)
-            return
+            val unlockAt = unlockTimestamps[currentPackage]
+            val isRecentUnlocking = unlockAt != null && (now - unlockAt) < unlockGracePeriodMs
+            if (isRecentUnlocking) {
+                backgroundSince.remove(currentPackage)
+                lockInProgress.remove(currentPackage)
+                return
+            }
+
+            // Stale unlocking state can happen if unlock broadcast/order is interrupted.
+            clearSessionStateForPackage(currentPackage)
+            Log.d(TAG, "Cleared stale unlocking state for $currentPackage")
         }
 
         if (currentPackage in unlockedSessions) {
+            val latestEvent = SharedPreferencesManager.getInstance(this)
+                .getLatestActivityEventForPackage(groupId, currentPackage)
+            if (latestEvent != "OPENED") {
+                // CLOSED/no-history should always force a relock path.
+                clearSessionStateForPackage(currentPackage)
+                Log.d(TAG, "Forced relock for $currentPackage due to latestEvent=$latestEvent")
+            }
+
             val leftAt = backgroundSince[currentPackage]
             if (leftAt == null) {
-                return
+                if (currentPackage in unlockedSessions) {
+                    return
+                }
             }
 
-            val awayDuration = now - leftAt
-            if (awayDuration < exitGracePeriodMs) {
+            if (leftAt != null) {
+                val awayDuration = now - leftAt
+                if (awayDuration < exitGracePeriodMs) {
+                    backgroundSince.remove(currentPackage)
+                    return
+                }
+
+                unlockedSessions.remove(currentPackage)
                 backgroundSince.remove(currentPackage)
-                return
             }
-
-            unlockedSessions.remove(currentPackage)
-            backgroundSince.remove(currentPackage)
         }
 
         if (currentPackage !in lockInProgress) {
@@ -562,6 +588,28 @@ class AppMonitorService : Service() {
                 timestamp = timestamp
             )
         )
+    }
+
+    private fun markProtectedAppClosed(pkg: String, closedAtMs: Long, reason: String) {
+        if (pkg in unlockingApps) return
+
+        val insertedAt = backgroundSince.putIfAbsent(pkg, closedAtMs)
+        if (insertedAt == null) {
+            protectedPackageToGroupId[pkg]?.let { groupId ->
+                saveActivityLog(groupId, pkg, "CLOSED")
+                Log.d(TAG, "Logged CLOSED for $pkg (reason=$reason)")
+            }
+            unlockedSessions.remove(pkg)
+        }
+        lockInProgress.remove(pkg)
+    }
+
+    private fun clearSessionStateForPackage(pkg: String) {
+        unlockingApps.remove(pkg)
+        unlockedSessions.remove(pkg)
+        backgroundSince.remove(pkg)
+        lockInProgress.remove(pkg)
+        unlockTimestamps.remove(pkg)
     }
 
     companion object {
