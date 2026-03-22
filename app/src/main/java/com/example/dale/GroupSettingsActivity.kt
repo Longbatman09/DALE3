@@ -1,10 +1,14 @@
 package com.example.dale
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.biometric.BiometricManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -42,6 +46,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -110,6 +115,25 @@ fun GroupSettingsScreen(
     val showDeleteConfirmation = remember { mutableStateOf(false) }
     val showDestroyingLoader = remember { mutableStateOf(false) }
     val showRenameDialog = remember { mutableStateOf(false) }
+    val showFingerprintDialog = remember { mutableStateOf(false) }
+    val groupUsesPattern = remember(currentGroup) {
+        val app1Type = currentGroup?.app1LockType?.uppercase(Locale.ROOT)
+        val app2Type = currentGroup?.app2LockType?.uppercase(Locale.ROOT)
+        app1Type == "PATTERN" || app2Type == "PATTERN"
+    }
+    val hasFingerprintSensor = remember {
+        activity.packageManager.hasSystemFeature(PackageManager.FEATURE_FINGERPRINT)
+    }
+    val isFingerprintAvailable = remember {
+        if (!hasFingerprintSensor) {
+            false
+        } else {
+            BiometricManager.from(activity).canAuthenticate(
+                BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                    BiometricManager.Authenticators.BIOMETRIC_STRONG
+            ) == BiometricManager.BIOMETRIC_SUCCESS
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -179,10 +203,28 @@ fun GroupSettingsScreen(
                 ) {
                     // Change Password Option
                     SettingsCard(
-                        title = "Change Password",
-                        subtitle = "Update PIN for this group",
+                        title = if (groupUsesPattern) "Change Pattern" else "Change Password",
+                        subtitle = if (groupUsesPattern) {
+                            "Update pattern for this group"
+                        } else {
+                            "Update PIN for this group"
+                        },
                         icon = Icons.Default.Lock,
                         onClick = { showAppSelection.value = true }
+                    )
+
+                    SettingsCard(
+                        title = "Fingerprint Unlock",
+                        subtitle = when {
+                            !hasFingerprintSensor -> "Fingerprint sensor not available on this device"
+                            !isFingerprintAvailable -> "Add a fingerprint in device settings first"
+                            else -> "Enable fingerprint unlock per app"
+                        },
+                        icon = Icons.Default.Settings,
+                        enabled = hasFingerprintSensor,
+                        onClick = {
+                            showFingerprintDialog.value = true
+                        }
                     )
 
                     SettingsCard(
@@ -274,6 +316,20 @@ fun GroupSettingsScreen(
             )
         }
 
+        if (showFingerprintDialog.value && currentGroup != null) {
+            FingerprintSelectionDialog(
+                currentGroup = currentGroup,
+                sharedPrefs = sharedPrefs,
+                activity = activity,
+                isFingerprintAvailable = isFingerprintAvailable,
+                onDismiss = { showFingerprintDialog.value = false },
+                onSaved = { updatedGroup ->
+                    group = updatedGroup
+                    showFingerprintDialog.value = false
+                }
+            )
+        }
+
         // Delete Confirmation Dialog
         if (showDeleteConfirmation.value) {
             AlertDialog(
@@ -321,6 +377,168 @@ fun GroupSettingsScreen(
     }
 }
 
+@Composable
+fun FingerprintSelectionDialog(
+    currentGroup: AppGroup,
+    sharedPrefs: SharedPreferencesManager,
+    activity: ComponentActivity,
+    isFingerprintAvailable: Boolean,
+    onDismiss: () -> Unit,
+    onSaved: (AppGroup) -> Unit
+) {
+    var app1Enabled by remember(currentGroup.id) { mutableStateOf(currentGroup.app1FingerprintEnabled) }
+    var app2Enabled by remember(currentGroup.id) { mutableStateOf(currentGroup.app2FingerprintEnabled) }
+    var app1BiometricOnly by remember(currentGroup.id) { mutableStateOf(currentGroup.app1FingerprintBiometricOnly) }
+    var app2BiometricOnly by remember(currentGroup.id) { mutableStateOf(currentGroup.app2FingerprintBiometricOnly) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF03193B),
+        title = {
+            Text(
+                text = "Fingerprint Unlock",
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Android does not expose individual fingerprint identities to apps. Enable biometric unlock separately for each app.",
+                    color = Color(0xFFB0B0B0),
+                    fontSize = 12.sp
+                )
+
+                if (!isFingerprintAvailable) {
+                    Text(
+                        text = "No biometrics enrolled on this device.",
+                        color = Color(0xFFFFB74D),
+                        fontSize = 12.sp
+                    )
+
+                    TextButton(onClick = { openBiometricEnrollmentSettings(activity) }) {
+                        Text("Register Biometric")
+                    }
+                }
+
+                Text(
+                    text = "Policy: Biometric only OR Biometric + PIN fallback",
+                    color = Color(0xFFB0B0B0),
+                    fontSize = 12.sp
+                )
+
+                FingerprintPolicyRow(
+                    appName = currentGroup.app1Name,
+                    enabled = app1Enabled,
+                    biometricOnly = app1BiometricOnly,
+                    controlsEnabled = isFingerprintAvailable,
+                    onEnabledChange = {
+                        app1Enabled = it
+                        if (!it) app1BiometricOnly = false
+                    },
+                    onBiometricOnlyChange = { app1BiometricOnly = it }
+                )
+
+                FingerprintPolicyRow(
+                    appName = currentGroup.app2Name,
+                    enabled = app2Enabled,
+                    biometricOnly = app2BiometricOnly,
+                    controlsEnabled = isFingerprintAvailable,
+                    onEnabledChange = {
+                        app2Enabled = it
+                        if (!it) app2BiometricOnly = false
+                    },
+                    onBiometricOnlyChange = { app2BiometricOnly = it }
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val updated = currentGroup.copy(
+                        app1FingerprintEnabled = app1Enabled,
+                        app2FingerprintEnabled = app2Enabled,
+                        app1FingerprintBiometricOnly = app1Enabled && app1BiometricOnly,
+                        app2FingerprintBiometricOnly = app2Enabled && app2BiometricOnly
+                    )
+                    sharedPrefs.saveAppGroup(updated)
+                    onSaved(updated)
+                }
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+private fun FingerprintPolicyRow(
+    appName: String,
+    enabled: Boolean,
+    biometricOnly: Boolean,
+    controlsEnabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    onBiometricOnlyChange: (Boolean) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F2A54))
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = appName, color = Color.White, fontWeight = FontWeight.SemiBold)
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onEnabledChange,
+                    enabled = controlsEnabled
+                )
+            }
+
+            if (enabled) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (biometricOnly) "Biometric only" else "Biometric + PIN fallback",
+                        color = Color(0xFFB8C7E0),
+                        fontSize = 12.sp
+                    )
+                    Switch(
+                        checked = biometricOnly,
+                        onCheckedChange = onBiometricOnlyChange,
+                        enabled = controlsEnabled
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun openBiometricEnrollmentSettings(activity: ComponentActivity) {
+    try {
+        val enrollIntent = Intent(Settings.ACTION_BIOMETRIC_ENROLL).apply {
+            putExtra(
+                Settings.EXTRA_BIOMETRIC_AUTHENTICATORS_ALLOWED,
+                BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.BIOMETRIC_STRONG
+            )
+        }
+        activity.startActivity(enrollIntent)
+    } catch (_: Exception) {
+        activity.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
+    }
+}
+
 private const val MAX_GROUP_NAME_LENGTH = 30
 
 @Composable
@@ -352,7 +570,14 @@ fun RenameGroupDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Change Group Name", fontWeight = FontWeight.Bold) },
+        containerColor = Color(0xFF03193B),
+        title = {
+            Text(
+                "Change Group Name",
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        },
         text = {
             Column {
                 TextField(
@@ -361,8 +586,8 @@ fun RenameGroupDialog(
                     singleLine = true,
                     placeholder = { Text("Enter group name") },
                     colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color(0xFF0f3460),
-                        unfocusedContainerColor = Color(0xFF0a2940),
+                        focusedContainerColor = Color(0xFFB3C5DC),
+                        unfocusedContainerColor = Color(0xFF062752),
                         focusedTextColor = Color(0xFFE0E0E0),
                         unfocusedTextColor = Color(0xFFB0B0B0),
                         cursorColor = Purple80
@@ -526,7 +751,7 @@ fun AppSelectionDialog(
             Column(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("Choose which app's password you want to change:")
+                Text("Choose which app lock you want to change:")
 
                 // App 1 Card
                 Card(

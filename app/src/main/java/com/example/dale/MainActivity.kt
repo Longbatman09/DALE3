@@ -59,6 +59,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -468,12 +469,13 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
                     }
                 }
 
-                // Right side: DALE title
-                Text(
-                    text = "DALE",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
+                // Right side: DALE logo
+                Image(
+                    painter = painterResource(id = R.drawable.dale_logo),
+                    contentDescription = "DALE",
+                    modifier = Modifier
+                        .height(23.dp)
+                        .padding(end = 4.dp)
                 )
             }
 

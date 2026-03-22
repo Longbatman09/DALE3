@@ -1,6 +1,8 @@
 package com.example.dale
 
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -9,6 +11,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.OnBackPressedCallback
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -32,6 +36,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import com.example.dale.ui.theme.DALETheme
 import com.example.dale.ui.theme.Purple40
 import com.example.dale.ui.theme.Purple80
@@ -43,12 +49,19 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class DrawOverOtherAppsLockScreen : ComponentActivity() {
+class DrawOverOtherAppsLockScreen : FragmentActivity() {
 
     private var targetPackageName by mutableStateOf<String?>(null)
     private var groupId by mutableStateOf<String?>(null)
     private var isPinVerified = false
     private var isDismissing = false
+    private var canUseBiometricForTarget = false
+    private var isBiometricOnlyForTarget = false
+    private var biometricTriggeredOnce = false
+    private var isBiometricPromptShowing = false
+
+    private var biometricPrompt: BiometricPrompt? = null
+    private var biometricPromptInfo: BiometricPrompt.PromptInfo? = null
 
     private val relaunchHandler = Handler(Looper.getMainLooper())
 
@@ -76,6 +89,7 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
         )
 
         updateTargetState(intent)
+        refreshBiometricState()
 
         // Safety check: Never show lock screen for DALE itself
         if (targetPackageName == packageName) {
@@ -92,6 +106,9 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
                         modifier = Modifier.padding(innerPadding),
                         targetPackageName = targetPackageName,
                         groupId = groupId,
+                        canUseBiometric = canUseBiometricForTarget,
+                        biometricOnly = isBiometricOnlyForTarget && canUseBiometricForTarget,
+                        onBiometricRequested = { triggerBiometricPrompt() },
                         onUnlockSuccess = { unlockApp(it) },
                         onUnlockFail = { /* Handle fail */ },
                         onDismissRequested = { dismissToHome() },
@@ -100,17 +117,132 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
                 }
             }
         }
+
+        tryAutoBiometricPrompt()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         updateTargetState(intent)
+        refreshBiometricState()
+        tryAutoBiometricPrompt()
     }
 
     private fun updateTargetState(intent: Intent?) {
         targetPackageName = intent?.getStringExtra("TARGET_PACKAGE")
         groupId = intent?.getStringExtra("GROUP_ID")
+        biometricTriggeredOnce = false
+    }
+
+    private fun refreshBiometricState() {
+        val biometricEnabled = isBiometricEnabledForCurrentTarget()
+        isBiometricOnlyForTarget = if (isDebugBuild() && biometricEnabled) {
+            true
+        } else {
+            isBiometricOnlyForCurrentTarget()
+        }
+        canUseBiometricForTarget = isFingerprintAvailable() && biometricEnabled
+        if (canUseBiometricForTarget) {
+            prepareBiometricPrompt()
+        } else {
+            biometricPrompt = null
+            biometricPromptInfo = null
+        }
+    }
+
+    private fun isFingerprintAvailable(): Boolean {
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_FINGERPRINT)) return false
+        return BiometricManager.from(this).canAuthenticate(
+            BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                BiometricManager.Authenticators.BIOMETRIC_STRONG
+        ) == BiometricManager.BIOMETRIC_SUCCESS
+    }
+
+    private fun isDebugBuild(): Boolean {
+        return (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    }
+
+    private fun isBiometricEnabledForCurrentTarget(): Boolean {
+        val currentGroupId = groupId ?: return false
+        val currentTargetPackage = targetPackageName ?: return false
+        val group = SharedPreferencesManager.getInstance(this).getAppGroup(currentGroupId) ?: return false
+        return when (currentTargetPackage) {
+            group.app1PackageName -> group.app1FingerprintEnabled
+            group.app2PackageName -> group.app2FingerprintEnabled
+            else -> false
+        }
+    }
+
+    private fun isBiometricOnlyForCurrentTarget(): Boolean {
+        val currentGroupId = groupId ?: return false
+        val currentTargetPackage = targetPackageName ?: return false
+        val group = SharedPreferencesManager.getInstance(this).getAppGroup(currentGroupId) ?: return false
+        return when (currentTargetPackage) {
+            group.app1PackageName -> group.app1FingerprintBiometricOnly
+            group.app2PackageName -> group.app2FingerprintBiometricOnly
+            else -> false
+        }
+    }
+
+    private fun prepareBiometricPrompt() {
+        val executor = ContextCompat.getMainExecutor(this)
+        biometricPrompt = BiometricPrompt(
+            this,
+            executor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    super.onAuthenticationError(errorCode, errString)
+                    isBiometricPromptShowing = false
+                }
+
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    super.onAuthenticationSucceeded(result)
+                    isBiometricPromptShowing = false
+                    targetPackageName?.let { unlockApp(it) }
+                }
+
+                override fun onAuthenticationFailed() {
+                    super.onAuthenticationFailed()
+                    // Keep lockscreen visible; user can retry biometric or use credential.
+                }
+            }
+        )
+
+        val promptBuilder = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Unlock with fingerprint")
+            .setSubtitle("Authenticate to unlock this app")
+            .setAllowedAuthenticators(
+                BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                    BiometricManager.Authenticators.BIOMETRIC_STRONG
+            )
+
+        if (isBiometricOnlyForTarget) {
+            promptBuilder.setNegativeButtonText("Cancel")
+        } else {
+            promptBuilder.setNegativeButtonText("Use lock credential")
+        }
+
+        biometricPromptInfo = promptBuilder.build()
+    }
+
+    private fun triggerBiometricPrompt() {
+        if (!canUseBiometricForTarget || isBiometricPromptShowing || isFinishing) return
+        val prompt = biometricPrompt ?: return
+        val promptInfo = biometricPromptInfo ?: return
+
+        isBiometricPromptShowing = true
+        try {
+            prompt.authenticate(promptInfo)
+        } catch (_: Exception) {
+            isBiometricPromptShowing = false
+        }
+    }
+
+    private fun tryAutoBiometricPrompt() {
+        if (!canUseBiometricForTarget || biometricTriggeredOnce) return
+        biometricTriggeredOnce = true
+        window.decorView.post { triggerBiometricPrompt() }
     }
 
     private fun unlockApp(packageName: String) {
@@ -250,7 +382,7 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (!isPinVerified && !isDismissing) {
+        if (!isPinVerified && !isDismissing && !isBiometricPromptShowing) {
             relaunchHandler.postDelayed({
                 if (!isFinishing && !isPinVerified && !isDismissing) {
                     bringToFront()
@@ -261,7 +393,7 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        if (!isPinVerified && !isDismissing) {
+        if (!isPinVerified && !isDismissing && !isBiometricPromptShowing) {
             relaunchHandler.postDelayed({
                 if (!isFinishing && !isPinVerified && !isDismissing) {
                     bringToFront()
@@ -287,6 +419,7 @@ class DrawOverOtherAppsLockScreen : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        refreshBiometricState()
         if (!SharedPreferencesManager.getInstance(this).isProtectionEnabled()) {
             finishAndRemoveTask()
         }
@@ -302,6 +435,9 @@ fun LockScreenContent(
     modifier: Modifier = Modifier,
     targetPackageName: String?,
     groupId: String?,
+    canUseBiometric: Boolean,
+    biometricOnly: Boolean,
+    onBiometricRequested: () -> Unit,
     onUnlockSuccess: (String) -> Unit,
     onUnlockFail: () -> Unit,
     onDismissRequested: () -> Unit,
@@ -330,18 +466,21 @@ fun LockScreenContent(
         }
     }
 
-    val isPinMode = appInfo.lockType.uppercase() != "PASSWORD"
+    val normalizedLockType = appInfo.lockType.uppercase()
+    val isPatternMode = normalizedLockType == "PATTERN"
+    val isPinMode = normalizedLockType == "PIN"
 
-    suspend fun verifyAndUnlock() {
+    suspend fun verifyAndUnlock(inputCredential: String) {
         if (isVerifying) return
-        if (isPinMode && credentialInput.length != 4) return
-        if (!isPinMode && credentialInput.length < 6) return
+        if (isPatternMode && inputCredential.length < 4) return
+        if (isPinMode && inputCredential.length != 4) return
+        if (!isPinMode && !isPatternMode && inputCredential.length < 6) return
 
         isVerifying = true
         delay(150)
 
         val hashedInput = MessageDigest.getInstance("SHA-256")
-            .digest(credentialInput.toByteArray())
+            .digest(inputCredential.toByteArray())
             .joinToString("") { "%02x".format(it) }
 
         if (hashedInput == appInfo.lockHash) {
@@ -368,12 +507,21 @@ fun LockScreenContent(
             else -> null
         }
 
-        if (otherAppHash != null && otherAppPackage != null && otherAppType == appInfo.lockType && hashedInput == otherAppHash) {
+        if (
+            otherAppHash != null &&
+            otherAppPackage != null &&
+            otherAppType?.uppercase() == appInfo.lockType.uppercase() &&
+            hashedInput == otherAppHash
+        ) {
             errorMessage = null
             onVerified()
             onUnlockSuccess(otherAppPackage)
         } else {
-            errorMessage = if (isPinMode) "Incorrect PIN" else "Incorrect password"
+            errorMessage = when {
+                isPatternMode -> "Incorrect pattern"
+                isPinMode -> "Incorrect PIN"
+                else -> "Incorrect password"
+            }
             delay(420)
             credentialInput = ""
             onUnlockFail()
@@ -384,7 +532,7 @@ fun LockScreenContent(
 
     LaunchedEffect(credentialInput, isPinMode) {
         if (isPinMode && credentialInput.length == 4) {
-            verifyAndUnlock()
+            verifyAndUnlock(credentialInput)
         }
     }
 
@@ -437,12 +585,38 @@ fun LockScreenContent(
 
             // Title
             Text(
-                text = if (isPinMode) "Enter PIN" else "Enter Password",
+                text = when {
+                    isPatternMode -> "Draw Pattern"
+                    isPinMode -> "Enter PIN"
+                    else -> "Enter Password"
+                },
                 fontSize = 20.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = Purple80,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
+
+            if (canUseBiometric) {
+                TextButton(
+                    onClick = onBiometricRequested,
+                    enabled = !isVerifying,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                ) {
+                    Text("Use Fingerprint")
+                }
+            }
+
+            if (biometricOnly) {
+                Text(
+                    text = "Biometric only enabled for this app",
+                    color = Color(0xFFB0B0B0),
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(bottom = 20.dp)
+                )
+
+                Spacer(modifier = Modifier.weight(1f))
+                return@Column
+            }
 
             if (isPinMode) {
                 // PIN Display (dots)
@@ -468,6 +642,36 @@ fun LockScreenContent(
                         )
                     }
                 }
+            } else if (isPatternMode) {
+                Spacer(modifier = Modifier.height(64.dp))
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(340.dp)
+                        .padding(horizontal = 8.dp, vertical = 10.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF2a2a3e))
+                ) {
+                    PatternLockPad(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
+                        enabled = !isVerifying,
+                        onPatternDrawn = { patternValue ->
+                            if (!isVerifying) {
+                                errorMessage = null
+                                scope.launch { verifyAndUnlock(patternValue) }
+                            }
+                        }
+                    )
+                }
+
+                Text(
+                    text = "Connect at least 4 dots",
+                    color = Color.Gray,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
             } else {
                 OutlinedTextField(
                     value = credentialInput,
@@ -562,12 +766,12 @@ fun LockScreenContent(
                         )
                     }
                 }
-            } else {
+            } else if (!isPatternMode) {
                 Button(
                     onClick = {
                         if (!isVerifying) {
                             errorMessage = null
-                            scope.launch { verifyAndUnlock() }
+                            scope.launch { verifyAndUnlock(credentialInput) }
                         }
                     },
                     enabled = credentialInput.length >= 6 && !isVerifying,
@@ -578,23 +782,25 @@ fun LockScreenContent(
                 ) {
                     Text("Unlock")
                 }
+            } else {
+                Spacer(modifier = Modifier.height(24.dp))
             }
-        }
-    }
-}
+         }
+     }
+ }
 
-private data class LockTarget(
+ private data class LockTarget(
     val appPackage: String,
     val lockHash: String,
     val lockType: String
-)
+ )
 
-@Composable
-fun NumberButton(
+ @Composable
+ fun NumberButton(
     number: String,
     onClick: () -> Unit,
     enabled: Boolean = true
-) {
+ ) {
     Button(
         onClick = onClick,
         modifier = Modifier
@@ -619,4 +825,5 @@ fun NumberButton(
             color = if (enabled) Purple80 else Color(0xFF666666)
         )
     }
-}
+ }
+

@@ -39,9 +39,31 @@ class SharedPreferencesManager private constructor(context: Context) {
         sharedPreferences.edit().putString("app_group_${appGroup.id}", json).apply()
     }
 
+    fun savePendingAppGroup(appGroup: AppGroup) {
+        val json = gson.toJson(appGroup)
+        sharedPreferences.edit().putString("pending_app_group_${appGroup.id}", json).apply()
+    }
+
     fun getAppGroup(groupId: String): AppGroup? {
         val json = sharedPreferences.getString("app_group_$groupId", null)
         return if (json != null) gson.fromJson(json, AppGroup::class.java) else null
+    }
+
+    fun getPendingAppGroup(groupId: String): AppGroup? {
+        val json = sharedPreferences.getString("pending_app_group_$groupId", null)
+        return if (json != null) gson.fromJson(json, AppGroup::class.java) else null
+    }
+
+    fun getAppGroupForSetup(groupId: String): AppGroup? {
+        return getPendingAppGroup(groupId) ?: getAppGroup(groupId)
+    }
+
+    fun saveAppGroupForSetup(appGroup: AppGroup) {
+        if (getPendingAppGroup(appGroup.id) != null) {
+            savePendingAppGroup(appGroup)
+        } else {
+            saveAppGroup(appGroup)
+        }
     }
 
     fun getAllAppGroups(): List<AppGroup> {
@@ -58,6 +80,17 @@ class SharedPreferencesManager private constructor(context: Context) {
 
     fun deleteAppGroup(groupId: String) {
         sharedPreferences.edit().remove("app_group_$groupId").apply()
+    }
+
+    fun deletePendingAppGroup(groupId: String) {
+        sharedPreferences.edit().remove("pending_app_group_$groupId").apply()
+    }
+
+    fun commitPendingAppGroup(groupId: String): AppGroup? {
+        val pendingGroup = getPendingAppGroup(groupId) ?: return null
+        saveAppGroup(pendingGroup)
+        deletePendingAppGroup(groupId)
+        return pendingGroup
     }
 
     fun clearAllData() {

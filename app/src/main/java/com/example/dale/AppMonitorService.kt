@@ -28,7 +28,7 @@ class AppMonitorService : Service() {
     private val checkIntervalMs = 400L
     private var isPolling = false
 
-    // Session tracking.
+    // ...existing code...
     private val unlockedSessions = mutableSetOf<String>()
     private val unlockingApps = mutableSetOf<String>()
     private val backgroundSince = mutableMapOf<String, Long>()

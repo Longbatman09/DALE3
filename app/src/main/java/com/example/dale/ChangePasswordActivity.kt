@@ -20,7 +20,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -100,6 +102,16 @@ fun ChangePasswordScreen(
     var step by remember { mutableStateOf(1) } // 1: current, 2: new, 3: confirm
     var errorMessage by remember { mutableStateOf("") }
 
+    val selectedLockType = remember(group, appPackage) {
+        when (appPackage) {
+            group?.app1PackageName -> group.app1LockType
+            group?.app2PackageName -> group.app2LockType
+            else -> "PIN"
+        }
+    }
+    val isPatternMode = selectedLockType.equals("PATTERN", ignoreCase = true)
+    val credentialLabel = if (isPatternMode) "Pattern" else "PIN"
+
     val appName = remember {
         try {
             activity.packageManager.getApplicationLabel(
@@ -138,14 +150,14 @@ fun ChangePasswordScreen(
             ) {
                 IconButton(onClick = { activity.finish() }) {
                     Icon(
-                        imageVector = Icons.Default.ArrowBack,
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
                         tint = Color.White
                     )
                 }
 
                 Text(
-                    text = "Change Password",
+                    text = if (isPatternMode) "Change Pattern" else "Change Password",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
@@ -163,9 +175,9 @@ fun ChangePasswordScreen(
             ) {
                 Text(
                     text = when (step) {
-                        1 -> "Enter Current PIN"
-                        2 -> "Enter New PIN"
-                        else -> "Confirm New PIN"
+                        1 -> "Enter Current $credentialLabel"
+                        2 -> "Enter New $credentialLabel"
+                        else -> "Confirm New $credentialLabel"
                     },
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
@@ -182,14 +194,126 @@ fun ChangePasswordScreen(
 
                 Spacer(modifier = Modifier.height(32.dp))
 
-                // PIN Display
-                PinDisplay(
-                    pin = when (step) {
-                        1 -> currentPin
-                        2 -> newPin
-                        else -> confirmPin
+                fun processCredentialAttempt(attempt: String) {
+                    if (attempt.length < 4) {
+                        errorMessage = if (isPatternMode) "Pattern must connect at least 4 dots" else "PIN must be 4 digits"
+                        return
                     }
-                )
+
+                    when (step) {
+                        1 -> {
+                            val storedPin = if (appPackage == group?.app1PackageName) {
+                                group?.app1LockPin
+                            } else {
+                                group?.app2LockPin
+                            }
+
+                            if (storedPin != null && verifyPin(attempt, storedPin)) {
+                                errorMessage = ""
+                                currentPin = attempt
+                                step = 2
+                            } else {
+                                errorMessage = if (isPatternMode) "Incorrect pattern" else "Incorrect PIN"
+                                currentPin = ""
+                            }
+                        }
+
+                        2 -> {
+                            val oldPin = if (appPackage == group?.app1PackageName) {
+                                group?.app1LockPin
+                            } else {
+                                group?.app2LockPin
+                            }
+
+                            val otherAppPin = if (appPackage == group?.app1PackageName) {
+                                group?.app2LockPin
+                            } else {
+                                group?.app1LockPin
+                            }
+
+                            val otherAppName = if (appPackage == group?.app1PackageName) {
+                                group?.app2Name
+                            } else {
+                                group?.app1Name
+                            }
+
+                            val isOldPin = oldPin != null && verifyPin(attempt, oldPin)
+                            val isOtherAppPin = otherAppPin != null && verifyPin(attempt, otherAppPin)
+
+                            when {
+                                isOldPin -> {
+                                    errorMessage = if (isPatternMode) "Same as old pattern" else "Same as old pin"
+                                    newPin = ""
+                                }
+
+                                isOtherAppPin -> {
+                                    errorMessage = if (isPatternMode) {
+                                        "Same as $otherAppName pattern"
+                                    } else {
+                                        "Same as $otherAppName pin"
+                                    }
+                                    newPin = ""
+                                }
+
+                                else -> {
+                                    errorMessage = ""
+                                    newPin = attempt
+                                    step = 3
+                                }
+                            }
+                        }
+
+                        3 -> {
+                            confirmPin = attempt
+                            if (newPin == confirmPin) {
+                                if (group != null) {
+                                    val hashedPin = hashPin(newPin)
+                                    val updatedGroup = if (appPackage == group.app1PackageName) {
+                                        group.copy(app1LockPin = hashedPin)
+                                    } else {
+                                        group.copy(app2LockPin = hashedPin)
+                                    }
+                                    sharedPrefs.saveAppGroup(updatedGroup)
+                                    Toast.makeText(
+                                        activity,
+                                        if (isPatternMode) "Pattern changed successfully" else "Password changed successfully",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    activity.finish()
+                                }
+                            } else {
+                                errorMessage = if (isPatternMode) "Patterns don't match" else "PINs don't match"
+                                confirmPin = ""
+                            }
+                        }
+                    }
+                }
+
+                if (isPatternMode) {
+                    Spacer(modifier = Modifier.height(78.dp))
+
+                    PatternChangePad(
+                        onPatternDrawn = { pattern ->
+                            errorMessage = ""
+                            processCredentialAttempt(pattern)
+                        }
+                    )
+
+                    Text(
+                        text = "Draw a pattern with at least 4 dots",
+                        fontSize = 12.sp,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                } else {
+                    PinDisplay(
+                        pin = when (step) {
+                            1 -> currentPin
+                            2 -> newPin
+                            else -> confirmPin
+                        }
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -205,115 +329,69 @@ fun ChangePasswordScreen(
 
                 Spacer(modifier = Modifier.height(32.dp))
 
-                // Number Pad
-                NumberPad(
-                    onNumberClick = { number ->
-                        when (step) {
-                            1 -> {
-                                if (currentPin.length < 4) {
-                                    currentPin += number
-                                    if (currentPin.length == 4) {
-                                        // Verify current PIN by hashing and comparing
-                                        val storedPin = if (appPackage == group?.app1PackageName) {
-                                            group?.app1LockPin
-                                        } else {
-                                            group?.app2LockPin
+                if (!isPatternMode) {
+                    NumberPad(
+                        onNumberClick = { number ->
+                            when (step) {
+                                1 -> {
+                                    if (currentPin.length < 4) {
+                                        currentPin += number
+                                        if (currentPin.length == 4) {
+                                            processCredentialAttempt(currentPin)
                                         }
+                                    }
+                                }
 
-                                        if (storedPin != null && verifyPin(currentPin, storedPin)) {
-                                            errorMessage = ""
-                                            step = 2
-                                        } else {
-                                            errorMessage = "Incorrect PIN"
-                                            currentPin = ""
+                                2 -> {
+                                    if (newPin.length < 4) {
+                                        newPin += number
+                                        if (newPin.length == 4) {
+                                            processCredentialAttempt(newPin)
+                                        }
+                                    }
+                                }
+
+                                3 -> {
+                                    if (confirmPin.length < 4) {
+                                        confirmPin += number
+                                        if (confirmPin.length == 4) {
+                                            processCredentialAttempt(confirmPin)
                                         }
                                     }
                                 }
                             }
-                            2 -> {
-                                if (newPin.length < 4) {
-                                    newPin += number
-                                    if (newPin.length == 4) {
-                                        // Get the current PIN (old one) for comparison
-                                        val oldPin = if (appPackage == group?.app1PackageName) {
-                                            group?.app1LockPin
-                                        } else {
-                                            group?.app2LockPin
-                                        }
-
-                                        // Get the other app's PIN for comparison
-                                        val otherAppPin = if (appPackage == group?.app1PackageName) {
-                                            group?.app2LockPin
-                                        } else {
-                                            group?.app1LockPin
-                                        }
-
-                                        // Get the other app's name for error message
-                                        val otherAppName = if (appPackage == group?.app1PackageName) {
-                                            group?.app2Name
-                                        } else {
-                                            group?.app1Name
-                                        }
-
-                                        // Validate new PIN
-                                        val isOldPin = oldPin != null && verifyPin(newPin, oldPin)
-                                        val isOtherAppPin = otherAppPin != null && verifyPin(newPin, otherAppPin)
-
-                                        when {
-                                            isOldPin -> {
-                                                errorMessage = "Same as old pin"
-                                                newPin = ""
-                                            }
-                                            isOtherAppPin -> {
-                                                errorMessage = "Same as $otherAppName pin"
-                                                newPin = ""
-                                            }
-                                            else -> {
-                                                errorMessage = ""
-                                                step = 3
-                                            }
-                                        }
-                                    }
-                                }
+                        },
+                        onBackspace = {
+                            when (step) {
+                                1 -> if (currentPin.isNotEmpty()) currentPin = currentPin.dropLast(1)
+                                2 -> if (newPin.isNotEmpty()) newPin = newPin.dropLast(1)
+                                3 -> if (confirmPin.isNotEmpty()) confirmPin = confirmPin.dropLast(1)
                             }
-                            3 -> {
-                                if (confirmPin.length < 4) {
-                                    confirmPin += number
-                                    if (confirmPin.length == 4) {
-                                        // Verify confirmation
-                                        if (newPin == confirmPin) {
-                                            // Update PIN with hashing
-                                            if (group != null) {
-                                                val hashedPin = hashPin(newPin)
-                                                val updatedGroup = if (appPackage == group.app1PackageName) {
-                                                    group.copy(app1LockPin = hashedPin)
-                                                } else {
-                                                    group.copy(app2LockPin = hashedPin)
-                                                }
-                                                sharedPrefs.saveAppGroup(updatedGroup)
-                                                Toast.makeText(activity, "Password changed successfully", Toast.LENGTH_SHORT).show()
-                                                activity.finish()
-                                            }
-                                        } else {
-                                            errorMessage = "PINs don't match"
-                                            confirmPin = ""
-                                        }
-                                    }
-                                }
-                            }
+                            errorMessage = ""
                         }
-                    },
-                    onBackspace = {
-                        when (step) {
-                            1 -> if (currentPin.isNotEmpty()) currentPin = currentPin.dropLast(1)
-                            2 -> if (newPin.isNotEmpty()) newPin = newPin.dropLast(1)
-                            3 -> if (confirmPin.isNotEmpty()) confirmPin = confirmPin.dropLast(1)
-                        }
-                        errorMessage = ""
-                    }
-                )
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+fun PatternChangePad(
+    onPatternDrawn: (String) -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(340.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF2a2a3e))
+    ) {
+        PatternLockPad(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            onPatternDrawn = onPatternDrawn
+        )
     }
 }
 

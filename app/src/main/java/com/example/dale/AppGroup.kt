@@ -12,5 +12,9 @@ data class AppGroup(
     val app2LockPin: String = "",
     val app1LockType: String = "PIN",
     val app2LockType: String = "PIN",
+    val app1FingerprintEnabled: Boolean = false,
+    val app2FingerprintEnabled: Boolean = false,
+    val app1FingerprintBiometricOnly: Boolean = false,
+    val app2FingerprintBiometricOnly: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 )

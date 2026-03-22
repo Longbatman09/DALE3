@@ -450,7 +450,7 @@ fun AppSelectionScreen(
                                 app2Name = app2.value?.appName ?: ""
                             )
 
-                            SharedPreferencesManager.getInstance(activity!!).saveAppGroup(appGroup)
+                            SharedPreferencesManager.getInstance(activity!!).savePendingAppGroup(appGroup)
 
                             val intent = Intent(activity, LockScreenSetupActivity::class.java)
                             intent.putExtra("groupId", appGroup.id)
