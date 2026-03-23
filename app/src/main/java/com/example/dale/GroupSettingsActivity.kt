@@ -702,6 +702,9 @@ fun AppSelectionDialog(
     onDismiss: () -> Unit,
     onAppSelected: (String) -> Unit
 ) {
+    val app1BiometricOnly = group.app1FingerprintEnabled && group.app1FingerprintBiometricOnly
+    val app2BiometricOnly = group.app2FingerprintEnabled && group.app2FingerprintBiometricOnly
+
     // Load app icons and names
     val app1Icon = remember {
         try {
@@ -757,9 +760,11 @@ fun AppSelectionDialog(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onAppSelected(group.app1PackageName) },
+                        .clickable(enabled = !app1BiometricOnly) {
+                            onAppSelected(group.app1PackageName)
+                        },
                     colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFF0f3460)
+                        containerColor = if (app1BiometricOnly) Color(0xFF1b2a40) else Color(0xFF0f3460)
                     )
                 ) {
                     Row(
@@ -778,12 +783,23 @@ fun AppSelectionDialog(
 
                         Spacer(modifier = Modifier.width(12.dp))
 
-                        Text(
-                            text = app1Name,
-                            fontSize = 16.sp,
-                            color = Color.White,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Column {
+                            Text(
+                                text = app1Name,
+                                fontSize = 16.sp,
+                                color = if (app1BiometricOnly) Color(0xFFB0BEC5) else Color.White,
+                                fontWeight = FontWeight.Medium
+                            )
+                            if (app1BiometricOnly) {
+                                Text(
+                                    text = "Biometrics only Policy",
+                                    fontSize = 12.sp,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -791,9 +807,11 @@ fun AppSelectionDialog(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onAppSelected(group.app2PackageName) },
+                        .clickable(enabled = !app2BiometricOnly) {
+                            onAppSelected(group.app2PackageName)
+                        },
                     colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFF0f3460)
+                        containerColor = if (app2BiometricOnly) Color(0xFF1b2a40) else Color(0xFF0f3460)
                     )
                 ) {
                     Row(
@@ -812,12 +830,23 @@ fun AppSelectionDialog(
 
                         Spacer(modifier = Modifier.width(12.dp))
 
-                        Text(
-                            text = app2Name,
-                            fontSize = 16.sp,
-                            color = Color.White,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Column {
+                            Text(
+                                text = app2Name,
+                                fontSize = 16.sp,
+                                color = if (app2BiometricOnly) Color(0xFFB0BEC5) else Color.White,
+                                fontWeight = FontWeight.Medium
+                            )
+                            if (app2BiometricOnly) {
+                                Text(
+                                    text = "Biometrics only Policy",
+                                    fontSize = 12.sp,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }

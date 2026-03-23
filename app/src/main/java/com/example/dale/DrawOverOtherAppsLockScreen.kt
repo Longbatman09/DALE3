@@ -1,7 +1,6 @@
 package com.example.dale
 
 import android.content.Intent
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
@@ -137,11 +136,7 @@ class DrawOverOtherAppsLockScreen : FragmentActivity() {
 
     private fun refreshBiometricState() {
         val biometricEnabled = isBiometricEnabledForCurrentTarget()
-        isBiometricOnlyForTarget = if (isDebugBuild() && biometricEnabled) {
-            true
-        } else {
-            isBiometricOnlyForCurrentTarget()
-        }
+        isBiometricOnlyForTarget = isBiometricOnlyForCurrentTarget()
         canUseBiometricForTarget = isFingerprintAvailable() && biometricEnabled
         if (canUseBiometricForTarget) {
             prepareBiometricPrompt()
@@ -159,9 +154,6 @@ class DrawOverOtherAppsLockScreen : FragmentActivity() {
         ) == BiometricManager.BIOMETRIC_SUCCESS
     }
 
-    private fun isDebugBuild(): Boolean {
-        return (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
-    }
 
     private fun isBiometricEnabledForCurrentTarget(): Boolean {
         val currentGroupId = groupId ?: return false

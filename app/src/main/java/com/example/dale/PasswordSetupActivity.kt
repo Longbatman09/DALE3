@@ -34,6 +34,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -124,7 +125,13 @@ class PasswordSetupActivity : ComponentActivity() {
     }
 
     // Save hashed credentials for both apps at the final step (only finalize at the end)
-    fun saveBothCredentials(groupId: String, app1AuthType: String, app1RawCredential: String, app2AuthType: String, app2RawCredential: String) {
+    fun saveBothCredentials(
+        groupId: String,
+        app1AuthType: String,
+        app1RawCredential: String,
+        app2AuthType: String,
+        app2RawCredential: String
+    ) {
         val sharedPrefsManager = SharedPreferencesManager.getInstance(this)
         val appGroup = sharedPrefsManager.getAppGroupForSetup(groupId)
         if (appGroup != null) {
@@ -149,41 +156,60 @@ class PasswordSetupActivity : ComponentActivity() {
         // This method is now deprecated. Credentials are saved at the final step only.
     }
 
-    fun saveBiometricForApps(groupId: String, app1Enabled: Boolean, app2Enabled: Boolean, app1BiometricOnly: Boolean, app2BiometricOnly: Boolean, app1BackupType: String = "PIN", app2BackupType: String = "PIN", app1BackupPin: String = "", app2BackupPin: String = "") {
+    fun saveBiometricForApps(
+        groupId: String,
+        app1Enabled: Boolean,
+        app2Enabled: Boolean,
+        app1BiometricOnly: Boolean,
+        app2BiometricOnly: Boolean,
+        app1BackupType: String = "PIN",
+        app2BackupType: String = "PIN",
+        app1BackupPin: String = "",
+        app2BackupPin: String = ""
+    ) {
         val sharedPrefsManager = SharedPreferencesManager.getInstance(this)
         val appGroup = sharedPrefsManager.getAppGroupForSetup(groupId)
         if (appGroup != null) {
-            val app1BackupPinHash = if (app1BackupPin.isNotEmpty()) hashPin(app1BackupPin) else appGroup.app1LockPin
-            val app2BackupPinHash = if (app2BackupPin.isNotEmpty()) hashPin(app2BackupPin) else appGroup.app2LockPin
-            
-            // If biometric+backup, ensure we have a backup credential
+            val resolvedBackupType = app1BackupType.ifBlank {
+                app2BackupType.ifBlank { "PIN" }
+            }.uppercase()
+
             val app1BackupFinal = if (app1Enabled && !app1BiometricOnly) {
-                // Backup needed - use the provided backup or existing
                 if (app1BackupPin.isNotEmpty()) hashPin(app1BackupPin) else appGroup.app1LockPin
             } else if (app1Enabled && app1BiometricOnly) {
-                // Biometric only - may have backup from previous entry
                 appGroup.app1LockPin
             } else {
-                appGroup.app1LockPin
+                // Non-biometric app in mixed setup uses selected app auth
+                if (app1BackupPin.isNotEmpty()) hashPin(app1BackupPin) else appGroup.app1LockPin
             }
-            
+
             val app2BackupFinal = if (app2Enabled && !app2BiometricOnly) {
-                // Backup needed - use the provided backup or existing
                 if (app2BackupPin.isNotEmpty()) hashPin(app2BackupPin) else appGroup.app2LockPin
             } else if (app2Enabled && app2BiometricOnly) {
-                // Biometric only - may have backup from previous entry
                 appGroup.app2LockPin
             } else {
-                appGroup.app2LockPin
+                // Non-biometric app in mixed setup uses selected app auth
+                if (app2BackupPin.isNotEmpty()) hashPin(app2BackupPin) else appGroup.app2LockPin
             }
-            
+
+            val app1TypeFinal = when {
+                app1Enabled && app1BiometricOnly -> "BIOMETRIC"
+                app1Enabled && !app1BiometricOnly -> resolvedBackupType
+                else -> resolvedBackupType
+            }
+            val app2TypeFinal = when {
+                app2Enabled && app2BiometricOnly -> "BIOMETRIC"
+                app2Enabled && !app2BiometricOnly -> resolvedBackupType
+                else -> resolvedBackupType
+            }
+
             val newGroup = appGroup.copy(
                 app1FingerprintEnabled = app1Enabled,
                 app2FingerprintEnabled = app2Enabled,
                 app1FingerprintBiometricOnly = app1Enabled && app1BiometricOnly,
                 app2FingerprintBiometricOnly = app2Enabled && app2BiometricOnly,
-                app1LockType = if (app1Enabled) "BIOMETRIC" else appGroup.app1LockType,
-                app2LockType = if (app2Enabled) "BIOMETRIC" else appGroup.app2LockType,
+                app1LockType = app1TypeFinal,
+                app2LockType = app2TypeFinal,
                 app1LockPin = app1BackupFinal,
                 app2LockPin = app2BackupFinal,
                 isLocked = true
@@ -252,6 +278,8 @@ fun PasswordSetupScreen(
     val showBiometricAppsDialog = remember { mutableStateOf(false) }
     val showBiometricBackupDialog = remember { mutableStateOf(false) }
     val showBiometricBackupPinDialog = remember { mutableStateOf<Int?>(null) }
+    val pendingCredentialApps = remember { mutableStateListOf<Int>() }
+    val activeCredentialApp = remember { mutableStateOf<Int?>(null) }
     
     // Store credentials temporarily until final confirmation
     val app1Credential = remember { mutableStateOf<String?>(null) }
@@ -267,10 +295,30 @@ fun PasswordSetupScreen(
     val app2BiometricEnabled = remember { mutableStateOf(false) }
     val app1BiometricOnly = remember { mutableStateOf(true) }
     val app2BiometricOnly = remember { mutableStateOf(true) }
+    val groupBackupType = remember { mutableStateOf<String?>(null) }
     val app1BackupType = remember { mutableStateOf("PIN") }
     val app2BackupType = remember { mutableStateOf("PIN") }
     val app1BackupPin = remember { mutableStateOf("") }
     val app2BackupPin = remember { mutableStateOf("") }
+
+    fun finalizeBiometricFlow() {
+        (activity as? PasswordSetupActivity)?.saveBiometricForApps(
+            groupId = groupId,
+            app1Enabled = app1BiometricEnabled.value,
+            app2Enabled = app2BiometricEnabled.value,
+            app1BiometricOnly = app1BiometricOnly.value,
+            app2BiometricOnly = app2BiometricOnly.value,
+            app1BackupType = groupBackupType.value ?: app1BackupType.value,
+            app2BackupType = groupBackupType.value ?: app1BackupType.value,
+            app1BackupPin = app1BackupPin.value,
+            app2BackupPin = app2BackupPin.value
+        )
+        if (!overlayAllowed.value) {
+            showOverlayDialog.value = true
+        } else {
+            (activity as? PasswordSetupActivity)?.proceedToOverlayPermission(groupId)
+        }
+    }
 
     // resetKey forces PinEntryScreen recomposition when changed
     val resetKey = remember { mutableStateOf(0) }
@@ -278,6 +326,7 @@ fun PasswordSetupScreen(
     // Load app names for UI
     val app1Name = remember { mutableStateOf("App 1") }
     val app2Name = remember { mutableStateOf("App 2") }
+    val groupName = remember { mutableStateOf("Group") }
 
     // Load actual names from SharedPreferences
     val sharedPrefs = SharedPreferencesManager.getInstance(activity as ComponentActivity)
@@ -285,6 +334,7 @@ fun PasswordSetupScreen(
     appGroup.value?.let { group ->
         if (group.app1Name.isNotEmpty()) app1Name.value = group.app1Name
         if (group.app2Name.isNotEmpty()) app2Name.value = group.app2Name
+        if (group.groupName.isNotEmpty()) groupName.value = group.groupName
     }
     
     // Check biometric availability
@@ -390,28 +440,76 @@ fun PasswordSetupScreen(
                                 if (targetAppIndex.value == 1) {
                                     app1Credential.value = credential
                                     app1AuthType.value = authType
+                                    app1BackupType.value = authType
+                                    app2BackupType.value = authType
+                                    groupBackupType.value = authType
+                                    app1BackupPin.value = credential
                                     firstAppCredential.value = credential
-                                    targetAppIndex.value = 2
-                                    resetKey.value = resetKey.value + 1
+                                    if (activeCredentialApp.value != null || pendingCredentialApps.isNotEmpty()) {
+                                        if (pendingCredentialApps.isNotEmpty()) {
+                                            activeCredentialApp.value = pendingCredentialApps.removeAt(0)
+                                            val sharedType = groupBackupType.value
+                                            if (sharedType != null) {
+                                                showBiometricBackupPinDialog.value = null
+                                                selectedAuthType.value = sharedType
+                                                targetAppIndex.value = activeCredentialApp.value ?: 1
+                                                resetKey.value = resetKey.value + 1
+                                            } else {
+                                                showBiometricBackupPinDialog.value = activeCredentialApp.value
+                                                selectedAuthType.value = null
+                                            }
+                                        } else {
+                                            activeCredentialApp.value = null
+                                            selectedAuthType.value = null
+                                            finalizeBiometricFlow()
+                                        }
+                                    } else {
+                                        targetAppIndex.value = 2
+                                        resetKey.value = resetKey.value + 1
+                                    }
                                 } else {
                                     // Both apps done, now save at final step
                                     app2Credential.value = credential
                                     app2AuthType.value = authType
-                                    
-                                    // Save both credentials together
-                                    (activity as? PasswordSetupActivity)?.saveBothCredentials(
-                                        groupId = groupId,
-                                        app1AuthType = app1AuthType.value ?: "PIN",
-                                        app1RawCredential = app1Credential.value ?: "",
-                                        app2AuthType = app2AuthType.value ?: "PIN",
-                                        app2RawCredential = app2Credential.value ?: ""
-                                    )
-                                    
-                                    // Proceed to overlay permission
-                                    if (!overlayAllowed.value) {
-                                        showOverlayDialog.value = true
+                                    app2BackupType.value = authType
+                                    app1BackupType.value = authType
+                                    groupBackupType.value = authType
+                                    app2BackupPin.value = credential
+
+                                    if (activeCredentialApp.value != null || pendingCredentialApps.isNotEmpty()) {
+                                        if (pendingCredentialApps.isNotEmpty()) {
+                                            activeCredentialApp.value = pendingCredentialApps.removeAt(0)
+                                            val sharedType = groupBackupType.value
+                                            if (sharedType != null) {
+                                                showBiometricBackupPinDialog.value = null
+                                                selectedAuthType.value = sharedType
+                                                targetAppIndex.value = activeCredentialApp.value ?: 2
+                                                resetKey.value = resetKey.value + 1
+                                            } else {
+                                                showBiometricBackupPinDialog.value = activeCredentialApp.value
+                                                selectedAuthType.value = null
+                                            }
+                                        } else {
+                                            activeCredentialApp.value = null
+                                            selectedAuthType.value = null
+                                            finalizeBiometricFlow()
+                                        }
                                     } else {
-                                        (activity as? PasswordSetupActivity)?.proceedToOverlayPermission(groupId)
+                                        // Save both credentials together
+                                        (activity as? PasswordSetupActivity)?.saveBothCredentials(
+                                            groupId = groupId,
+                                            app1AuthType = app1AuthType.value ?: "PIN",
+                                            app1RawCredential = app1Credential.value ?: "",
+                                            app2AuthType = app2AuthType.value ?: "PIN",
+                                            app2RawCredential = app2Credential.value ?: ""
+                                        )
+
+                                        // Proceed to overlay permission
+                                        if (!overlayAllowed.value) {
+                                            showOverlayDialog.value = true
+                                        } else {
+                                            (activity as? PasswordSetupActivity)?.proceedToOverlayPermission(groupId)
+                                        }
                                     }
                                 }
                             },
@@ -424,6 +522,14 @@ fun PasswordSetupScreen(
                                 app2Credential.value = null
                                 app1AuthType.value = null
                                 app2AuthType.value = null
+                                app1BackupPin.value = ""
+                                app2BackupPin.value = ""
+                                app1BackupType.value = "PIN"
+                                app2BackupType.value = "PIN"
+                                groupBackupType.value = null
+                                pendingCredentialApps.clear()
+                                activeCredentialApp.value = null
+                                showBiometricBackupPinDialog.value = null
                             }
                         )
                     }
@@ -462,28 +568,23 @@ fun PasswordSetupScreen(
                 onDismiss = { showBiometricBackupDialog.value = false },
                 onConfirm = {
                     showBiometricBackupDialog.value = false
-                    // If any app needs backup, show backup PIN dialogs
-                    if ((app1BiometricEnabled.value && !app1BiometricOnly.value) || 
-                        (app2BiometricEnabled.value && !app2BiometricOnly.value)) {
-                        if (app1BiometricEnabled.value && !app1BiometricOnly.value) {
-                            showBiometricBackupPinDialog.value = 1
-                        } else if (app2BiometricEnabled.value && !app2BiometricOnly.value) {
-                            showBiometricBackupPinDialog.value = 2
-                        }
+                    pendingCredentialApps.clear()
+                    groupBackupType.value = null
+                    app1BackupType.value = "PIN"
+                    app2BackupType.value = "PIN"
+
+                    // Ask auth setup for apps that are non-biometric OR biometric+backup
+                    val app1NeedsCredential = !app1BiometricEnabled.value || !app1BiometricOnly.value
+                    val app2NeedsCredential = !app2BiometricEnabled.value || !app2BiometricOnly.value
+
+                    if (app1NeedsCredential) pendingCredentialApps.add(1)
+                    if (app2NeedsCredential) pendingCredentialApps.add(2)
+
+                    if (pendingCredentialApps.isNotEmpty()) {
+                        activeCredentialApp.value = pendingCredentialApps.removeAt(0)
+                        showBiometricBackupPinDialog.value = activeCredentialApp.value
                     } else {
-                        // No backup needed, save biometric settings directly at final step
-                        (activity as? PasswordSetupActivity)?.saveBiometricForApps(
-                            groupId = groupId,
-                            app1Enabled = app1BiometricEnabled.value,
-                            app2Enabled = app2BiometricEnabled.value,
-                            app1BiometricOnly = app1BiometricOnly.value,
-                            app2BiometricOnly = app2BiometricOnly.value
-                        )
-                        if (!overlayAllowed.value) {
-                            showOverlayDialog.value = true
-                        } else {
-                            (activity as? PasswordSetupActivity)?.proceedToOverlayPermission(groupId)
-                        }
+                        finalizeBiometricFlow()
                     }
                 }
             )
@@ -492,65 +593,34 @@ fun PasswordSetupScreen(
         // Backup PIN/PASSWORD/PATTERN Dialogs
         if (showBiometricBackupPinDialog.value == 1) {
             BiometricBackupCredentialDialog(
-                appName = app1Name.value,
+                groupName = groupName.value,
                 onBackupTypeSelected = { backupType ->
                     app1BackupType.value = backupType
+                    app2BackupType.value = backupType
+                    groupBackupType.value = backupType
                     showBiometricBackupPinDialog.value = null
+                    activeCredentialApp.value = 1
                     // Show PIN entry for backup
                     selectedAuthType.value = backupType
                     targetAppIndex.value = 1
                     resetKey.value = resetKey.value + 1
-                },
-                onSkip = {
-                    showBiometricBackupPinDialog.value = null
-                    // Check if app2 also needs backup
-                    if (app2BiometricEnabled.value && !app2BiometricOnly.value) {
-                        showBiometricBackupPinDialog.value = 2
-                    } else {
-                        // Save all biometric settings at final step
-                        (activity as? PasswordSetupActivity)?.saveBiometricForApps(
-                            groupId = groupId,
-                            app1Enabled = app1BiometricEnabled.value,
-                            app2Enabled = app2BiometricEnabled.value,
-                            app1BiometricOnly = app1BiometricOnly.value,
-                            app2BiometricOnly = app2BiometricOnly.value
-                        )
-                        if (!overlayAllowed.value) {
-                            showOverlayDialog.value = true
-                        } else {
-                            (activity as? PasswordSetupActivity)?.proceedToOverlayPermission(groupId)
-                        }
-                    }
                 }
             )
         }
 
         if (showBiometricBackupPinDialog.value == 2) {
             BiometricBackupCredentialDialog(
-                appName = app2Name.value,
+                groupName = groupName.value,
                 onBackupTypeSelected = { backupType ->
                     app2BackupType.value = backupType
+                    app1BackupType.value = backupType
+                    groupBackupType.value = backupType
                     showBiometricBackupPinDialog.value = null
+                    activeCredentialApp.value = 2
                     // Show PIN entry for backup
                     selectedAuthType.value = backupType
                     targetAppIndex.value = 2
                     resetKey.value = resetKey.value + 1
-                },
-                onSkip = {
-                    showBiometricBackupPinDialog.value = null
-                    // Save all biometric settings at final step
-                    (activity as? PasswordSetupActivity)?.saveBiometricForApps(
-                        groupId = groupId,
-                        app1Enabled = app1BiometricEnabled.value,
-                        app2Enabled = app2BiometricEnabled.value,
-                        app1BiometricOnly = app1BiometricOnly.value,
-                        app2BiometricOnly = app2BiometricOnly.value
-                    )
-                    if (!overlayAllowed.value) {
-                        showOverlayDialog.value = true
-                    } else {
-                        (activity as? PasswordSetupActivity)?.proceedToOverlayPermission(groupId)
-                    }
                 }
             )
         }
@@ -1148,16 +1218,15 @@ fun BiometricPolicyRow(
 
 @Composable
 fun BiometricBackupCredentialDialog(
-    appName: String,
-    onBackupTypeSelected: (String) -> Unit,
-    onSkip: () -> Unit
+    groupName: String,
+    onBackupTypeSelected: (String) -> Unit
 ) {
     AlertDialog(
         onDismissRequest = {},
         containerColor = Color(0xFF03193B),
         title = {
             Text(
-                text = "Backup Authentication for $appName",
+                text = "Backup for $groupName",
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
                 fontSize = 14.sp
@@ -1166,7 +1235,7 @@ fun BiometricBackupCredentialDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "Choose backup authentication method if biometric fails:",
+                    text = "Choose authentication method for this app:",
                     color = Color(0xFFB0B0B0),
                     fontSize = 12.sp
                 )
@@ -1185,10 +1254,6 @@ fun BiometricBackupCredentialDialog(
                 }
             }
         },
-        confirmButton = {
-            TextButton(onClick = onSkip) {
-                Text("Skip Backup")
-            }
-        }
+        confirmButton = {}
     )
 }
