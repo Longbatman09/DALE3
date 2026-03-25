@@ -19,6 +19,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -35,6 +36,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.example.dale.ui.theme.DALETheme
@@ -67,7 +69,7 @@ class DrawOverOtherAppsLockScreen : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Consume system back; only top-right arrow should dismiss.
+        // Consume system back; only top-left arrow should dismiss.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 // no-op
@@ -363,6 +365,10 @@ class DrawOverOtherAppsLockScreen : FragmentActivity() {
     private fun dismissToHome() {
         if (isFinishing || isDismissing || isPinVerified) return
         isDismissing = true
+        relaunchHandler.removeCallbacksAndMessages(null)
+
+        // Treat manual dismiss as closing the currently targeted protected app.
+        targetPackageName?.let { recordAppClosedLog(groupId, it) }
 
         val homeIntent = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_HOME)
@@ -534,8 +540,8 @@ fun LockScreenContent(
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xFF1a1a2e),
-                        Color(0xFF16213e)
+                        Color(0xFF03193B),
+                        Color(0xFF02122E)
                     )
                 )
             )
@@ -544,8 +550,10 @@ fun LockScreenContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.TopCenter)
-                .padding(horizontal = 12.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.End
+                .statusBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .zIndex(2f),
+            horizontalArrangement = Arrangement.Start
         ) {
             IconButton(onClick = onDismissRequested) {
                 Icon(
@@ -559,151 +567,225 @@ fun LockScreenContent(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 32.dp, vertical = 32.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(56.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-            // Lock Icon
-            Icon(
-                imageVector = Icons.Default.Lock,
-                contentDescription = "Lock",
-                tint = Purple80,
-                modifier = Modifier
-                    .size(80.dp)
-                    .padding(bottom = 24.dp)
-            )
-
-
-            // Title
-            Text(
-                text = when {
-                    isPatternMode -> "Draw Pattern"
-                    isPinMode -> "Enter PIN"
-                    else -> "Enter Password"
-                },
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Purple80,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
-
-            if (canUseBiometric) {
-                TextButton(
-                    onClick = onBiometricRequested,
-                    enabled = !isVerifying,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                ) {
-                    Text("Use Fingerprint")
-                }
+            val credentialCardModifier = if (isPinMode && !biometricOnly) {
+                Modifier.fillMaxWidth()
+            } else {
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false)
             }
 
-            if (biometricOnly) {
-                Text(
-                    text = "Biometric only enabled for this app",
-                    color = Color(0xFFB0B0B0),
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(bottom = 20.dp)
-                )
-
-                Spacer(modifier = Modifier.weight(1f))
-                return@Column
-            }
-
-            if (isPinMode) {
-                // PIN Display (dots)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 48.dp, vertical = 24.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    repeat(4) { index ->
-                        Box(
-                            modifier = Modifier
-                                .size(16.dp)
-                                .shadow(
-                                    elevation = if (index < credentialInput.length) 4.dp else 0.dp,
-                                    shape = androidx.compose.foundation.shape.CircleShape
-                                )
-                                .background(
-                                    color = if (index < credentialInput.length) Purple80 else Color(0xFF3a4b5d),
-                                    shape = androidx.compose.foundation.shape.CircleShape
-                                )
+            val credentialContent: @Composable ColumnScope.() -> Unit = {
+                    Box(
+                        modifier = Modifier
+                            .size(68.dp)
+                            .background(Color(0x332A4A73), shape = RoundedCornerShape(34.dp))
+                            .border(1.dp, Color(0x664A77B6), RoundedCornerShape(34.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "Lock",
+                            tint = Color.White,
+                            modifier = Modifier.size(34.dp)
                         )
                     }
-                }
-            } else if (isPatternMode) {
-                Spacer(modifier = Modifier.height(64.dp))
 
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(340.dp)
-                        .padding(horizontal = 8.dp, vertical = 10.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF2a2a3e))
-                ) {
-                    PatternLockPad(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp),
-                        enabled = !isVerifying,
-                        onPatternDrawn = { patternValue ->
-                            if (!isVerifying) {
-                                errorMessage = null
-                                scope.launch { verifyAndUnlock(patternValue) }
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = when {
+                            isPatternMode -> "Draw Pattern"
+                            isPinMode -> "Enter PIN"
+                            else -> "Enter Password"
+                        },
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+
+                    Text(
+                        text = "Authenticate to continue",
+                        fontSize = 13.sp,
+                        color = Color(0xFF9FB2CC),
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+
+                    if (canUseBiometric) {
+                        TextButton(
+                            onClick = onBiometricRequested,
+                            enabled = !isVerifying,
+                            modifier = Modifier.padding(top = 6.dp)
+                        ) {
+                            Text("Use Fingerprint", color = Color(0xFFB6CCFF))
+                        }
+                    }
+
+                    if (biometricOnly) {
+                        Text(
+                            text = "Biometric only enabled for this app",
+                            color = Color(0xFFD6D6D6),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                    } else if (isPinMode) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 34.dp, bottom = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            repeat(4) { index ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .background(
+                                            color = if (index < credentialInput.length) Color(0xFF97B9FF) else Color(0xFF4A5A72),
+                                            shape = RoundedCornerShape(7.dp)
+                                        )
+                                        .border(
+                                            1.dp,
+                                            if (index < credentialInput.length) Color(0xFFBBD2FF) else Color(0xFF5B6C86),
+                                            RoundedCornerShape(7.dp)
+                                        )
+                                )
                             }
                         }
-                    )
+                    } else if (isPatternMode) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(338.dp)
+                                .padding(top = 20.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF132E56)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x334C78AD))
+                        ) {
+                            PatternLockPad(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(16.dp),
+                                enabled = !isVerifying,
+                                onPatternDrawn = { patternValue ->
+                                    if (!isVerifying) {
+                                        errorMessage = null
+                                        scope.launch { verifyAndUnlock(patternValue) }
+                                    }
+                                }
+                            )
+                        }
+
+                        Text(
+                            text = "Connect at least 4 dots",
+                            color = Color(0xFF9FB2CC),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 10.dp)
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = credentialInput,
+                            onValueChange = { credentialInput = it.take(32) },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            label = { Text("Password") },
+                            enabled = !isVerifying,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF8EB2F4),
+                                unfocusedBorderColor = Color(0xFF4A5E7E),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedContainerColor = Color(0xFF0C2447),
+                                unfocusedContainerColor = Color(0xFF0C2447),
+                                focusedLabelColor = Color(0xFFABC7FF),
+                                unfocusedLabelColor = Color(0xFF8AA3C7)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 20.dp)
+                        )
+                    }
+
+                    AnimatedVisibility(
+                        visible = errorMessage != null,
+                        enter = fadeIn(animationSpec = tween(250)),
+                        exit = fadeOut(animationSpec = tween(250))
+                    ) {
+                        Text(
+                            text = errorMessage ?: "",
+                            color = Color(0xFFFF7878),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(top = 12.dp)
+                        )
+                    }
+
+                    if (!isPinMode && !isPatternMode) {
+                        Button(
+                            onClick = {
+                                if (!isVerifying) {
+                                    errorMessage = null
+                                    scope.launch { verifyAndUnlock(credentialInput) }
+                                }
+                            },
+                            enabled = credentialInput.length >= 6 && !isVerifying,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .padding(top = 14.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF2E5E9E),
+                                disabledContainerColor = Color(0xFF1A3152)
+                            )
+                        ) {
+                            Text("Unlock", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
 
-                Text(
-                    text = "Connect at least 4 dots",
-                    color = Color.Gray,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(bottom = 8.dp)
+            if (isPinMode && !biometricOnly) {
+                Column(
+                    modifier = credentialCardModifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    content = credentialContent
                 )
             } else {
-                OutlinedTextField(
-                    value = credentialInput,
-                    onValueChange = { credentialInput = it.take(32) },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    label = { Text("Password") },
-                    enabled = !isVerifying,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 16.dp)
-                )
+                Card(
+                    modifier = credentialCardModifier,
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xCC0A2548)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x443D6EA4))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        content = credentialContent
+                    )
+                }
             }
 
-            // Error Message
-            AnimatedVisibility(
-                visible = errorMessage != null,
-                enter = fadeIn(animationSpec = tween(300)),
-                exit = fadeOut(animationSpec = tween(300))
-            ) {
-                Text(
-                    text = errorMessage ?: "",
-                    color = Color(0xFFFF6B6B),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            }
+            if (isPinMode && !biometricOnly) {
+                Spacer(modifier = Modifier.weight(1f))
 
-            Spacer(modifier = Modifier.weight(1f))
-
-            if (isPinMode) {
-                // Number Pad
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 20.dp),
+                        .navigationBarsPadding()
+                        .padding(top = 8.dp, bottom = 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Rows 1-3 (numbers 1-9)
                     for (row in 0..2) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -725,15 +807,12 @@ fun LockScreenContent(
                         }
                     }
 
-                    // Last row (empty, 0, backspace)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        // Empty space
-                        Spacer(modifier = Modifier.size(80.dp).padding(8.dp))
+                        Spacer(modifier = Modifier.size(76.dp).padding(6.dp))
 
-                        // Zero
                         NumberButton(
                             number = "0",
                             onClick = {
@@ -745,7 +824,6 @@ fun LockScreenContent(
                             enabled = !isVerifying
                         )
 
-                        // Backspace
                         NumberButton(
                             number = "⌫",
                             onClick = {
@@ -758,28 +836,12 @@ fun LockScreenContent(
                         )
                     }
                 }
-            } else if (!isPatternMode) {
-                Button(
-                    onClick = {
-                        if (!isVerifying) {
-                            errorMessage = null
-                            scope.launch { verifyAndUnlock(credentialInput) }
-                        }
-                    },
-                    enabled = credentialInput.length >= 6 && !isVerifying,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .padding(bottom = 20.dp)
-                ) {
-                    Text("Unlock")
-                }
             } else {
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(14.dp))
             }
-         }
-     }
- }
+        }
+    }
+}
 
  private data class LockTarget(
     val appPackage: String,
@@ -796,25 +858,25 @@ fun LockScreenContent(
     Button(
         onClick = onClick,
         modifier = Modifier
-            .size(80.dp)
-            .padding(8.dp)
+              .size(76.dp)
+              .padding(6.dp)
             .shadow(
-                elevation = if (enabled) 4.dp else 0.dp,
-                shape = RoundedCornerShape(40.dp)
+                  elevation = if (enabled) 3.dp else 0.dp,
+                  shape = CircleShape
             ),
         enabled = enabled,
-        shape = RoundedCornerShape(40.dp),
+          shape = CircleShape,
         colors = ButtonDefaults.buttonColors(
-            containerColor = Color(0xFF0f3460),
-            disabledContainerColor = Color(0xFF0a2940)
+              containerColor = Color(0xFF0F315C),
+              disabledContainerColor = Color(0xFF0A213F)
         ),
         contentPadding = PaddingValues(0.dp)
     ) {
         Text(
             text = number,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            color = if (enabled) Purple80 else Color(0xFF666666)
+              fontSize = 22.sp,
+              fontWeight = FontWeight.SemiBold,
+              color = if (enabled) Color.White else Color(0xFF6D7B8F)
         )
     }
  }

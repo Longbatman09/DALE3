@@ -3,7 +3,11 @@
     <style name="Theme.DALE" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_transparent_icon</item>
         <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
-        <item name="android:windowSplashScreenBackground">#031C3C</item>
+        <item name="android:windowSplashScreenBackground">@color/dale_system_bar</item>
         <item name="android:windowSplashScreenAnimationDuration">0</item>
+        <item name="android:statusBarColor">@color/dale_system_bar</item>
+        <item name="android:navigationBarColor">@color/dale_system_bar</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
     </style>
 </resources>

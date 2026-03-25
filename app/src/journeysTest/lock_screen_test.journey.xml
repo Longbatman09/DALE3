@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<journey name="Lock_Screen_test">
+    <description>used to check weather the app dedection system is working properly and correct logs
+        are registerd in the Activity logs page which is used to triggger the lock screen
+    </description>
+    <actions xml:space="preserve">
+        <action>click start setup</action><action>click ensure app created</action><action>Choose Any 2 apps</action><action>Create any 2 pin for testing</action>
+        <action>Allow accessibility services</action>
+        <action>go back to DALE , suring the accessibility services is enabled for DALE</action>
+        <action>after sucessfuly creating the group , go and try to open the app (any app which is selected for the grop ) and enetering the pin</action>
+        <action>with interval of 10 seconds close the app and reopen it and ensure the app lock is activated when left and comming back.</action>
+        <action><![CDATA[after opening the app in and out for 5 times with interval of 10 seconds . go and check the activity logs in DALE><group_name>>app logs>activity logs]]></action>
+        </actions>
+</journey>

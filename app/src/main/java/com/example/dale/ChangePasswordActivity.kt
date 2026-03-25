@@ -62,6 +62,7 @@ class ChangePasswordActivity : ComponentActivity() {
         val groupId = intent.getStringExtra("GROUP_ID") ?: ""
         val groupName = intent.getStringExtra("GROUP_NAME") ?: ""
         val appPackage = intent.getStringExtra("APP_PACKAGE") ?: ""
+        val isBackupRegistration = intent.getBooleanExtra("IS_BACKUP_REGISTRATION", false)
 
         setContent {
             DALETheme {
@@ -69,6 +70,7 @@ class ChangePasswordActivity : ComponentActivity() {
                     groupId = groupId,
                     groupName = groupName,
                     appPackage = appPackage,
+                    isBackupRegistration = isBackupRegistration,
                     activity = this,
                     hashPin = { pin -> this@ChangePasswordActivity.hashPin(pin) },
                     verifyPin = { input, stored -> this@ChangePasswordActivity.verifyPin(input, stored) }
@@ -83,6 +85,7 @@ fun ChangePasswordScreen(
     groupId: String,
     groupName: String,
     appPackage: String,
+    isBackupRegistration: Boolean,
     activity: ComponentActivity,
     hashPin: (String) -> String,
     verifyPin: (String, String) -> Boolean
@@ -99,7 +102,7 @@ fun ChangePasswordScreen(
     var currentPin by remember { mutableStateOf("") }
     var newPin by remember { mutableStateOf("") }
     var confirmPin by remember { mutableStateOf("") }
-    var step by remember { mutableStateOf(1) } // 1: current, 2: new, 3: confirm
+    var step by remember { mutableStateOf(if (isBackupRegistration) 2 else 1) } // 1: current, 2: new, 3: confirm
     var errorMessage by remember { mutableStateOf("") }
 
     val selectedLockType = remember(group, appPackage) {
@@ -157,7 +160,12 @@ fun ChangePasswordScreen(
                 }
 
                 Text(
-                    text = if (isPatternMode) "Change Pattern" else "Change Password",
+                    text = when {
+                        isBackupRegistration && isPatternMode -> "Set Backup Pattern"
+                        isBackupRegistration -> "Set Backup Password"
+                        isPatternMode -> "Change Pattern"
+                        else -> "Change Password"
+                    },
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
@@ -176,7 +184,7 @@ fun ChangePasswordScreen(
                 Text(
                     text = when (step) {
                         1 -> "Enter Current $credentialLabel"
-                        2 -> "Enter New $credentialLabel"
+                        2 -> if (isBackupRegistration) "Enter Backup $credentialLabel" else "Enter New $credentialLabel"
                         else -> "Confirm New $credentialLabel"
                     },
                     fontSize = 24.sp,
@@ -269,14 +277,25 @@ fun ChangePasswordScreen(
                                 if (group != null) {
                                     val hashedPin = hashPin(newPin)
                                     val updatedGroup = if (appPackage == group.app1PackageName) {
-                                        group.copy(app1LockPin = hashedPin)
+                                        group.copy(
+                                            app1LockPin = hashedPin,
+                                            app1FingerprintBiometricOnly = if (isBackupRegistration) false else group.app1FingerprintBiometricOnly
+                                        )
                                     } else {
-                                        group.copy(app2LockPin = hashedPin)
+                                        group.copy(
+                                            app2LockPin = hashedPin,
+                                            app2FingerprintBiometricOnly = if (isBackupRegistration) false else group.app2FingerprintBiometricOnly
+                                        )
                                     }
                                     sharedPrefs.saveAppGroup(updatedGroup)
                                     Toast.makeText(
                                         activity,
-                                        if (isPatternMode) "Pattern changed successfully" else "Password changed successfully",
+                                        when {
+                                            isBackupRegistration && isPatternMode -> "Backup pattern set successfully"
+                                            isBackupRegistration -> "Backup password set successfully"
+                                            isPatternMode -> "Pattern changed successfully"
+                                            else -> "Password changed successfully"
+                                        },
                                         Toast.LENGTH_SHORT
                                     ).show()
                                     activity.finish()

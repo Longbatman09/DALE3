@@ -55,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -292,13 +293,13 @@ fun GroupSettingsScreen(
                 group = currentGroup,
                 activity = activity,
                 onDismiss = { showAppSelection.value = false },
-                onAppSelected = { selectedApp ->
+                onAppSelected = { selectedApp, isBackupRegistration ->
                     showAppSelection.value = false
-                    // Navigate to password change screen
                     val intent = Intent(activity, ChangePasswordActivity::class.java)
                     intent.putExtra("GROUP_ID", currentGroup.id)
                     intent.putExtra("GROUP_NAME", currentGroup.groupName)
                     intent.putExtra("APP_PACKAGE", selectedApp)
+                    intent.putExtra("IS_BACKUP_REGISTRATION", isBackupRegistration)
                     activity.startActivity(intent)
                 }
             )
@@ -700,7 +701,7 @@ fun AppSelectionDialog(
     group: AppGroup,
     activity: ComponentActivity,
     onDismiss: () -> Unit,
-    onAppSelected: (String) -> Unit
+    onAppSelected: (String, Boolean) -> Unit
 ) {
     val app1BiometricOnly = group.app1FingerprintEnabled && group.app1FingerprintBiometricOnly
     val app2BiometricOnly = group.app2FingerprintEnabled && group.app2FingerprintBiometricOnly
@@ -742,6 +743,14 @@ fun AppSelectionDialog(
         }
     }
 
+    fun prettyAuthType(lockType: String): String {
+        return when (lockType.uppercase(Locale.ROOT)) {
+            "PATTERN" -> "Pattern"
+            "PASSWORD" -> "Password"
+            else -> "PIN"
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -761,7 +770,7 @@ fun AppSelectionDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable(enabled = !app1BiometricOnly) {
-                            onAppSelected(group.app1PackageName)
+                            onAppSelected(group.app1PackageName, false)
                         },
                     colors = CardDefaults.cardColors(
                         containerColor = if (app1BiometricOnly) Color(0xFF1b2a40) else Color(0xFF0f3460)
@@ -777,7 +786,9 @@ fun AppSelectionDialog(
                             Image(
                                 bitmap = app1Icon.toBitmap().asImageBitmap(),
                                 contentDescription = app1Name,
-                                modifier = Modifier.size(40.dp)
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .alpha(if (app1BiometricOnly) 0.35f else 1f)
                             )
                         }
 
@@ -798,6 +809,19 @@ fun AppSelectionDialog(
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(top = 2.dp)
                                 )
+                                TextButton(
+                                    onClick = {
+                                        onAppSelected(group.app1PackageName, true)
+                                    },
+                                    modifier = Modifier.padding(top = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Click to make backup ${prettyAuthType(group.app1LockType)} for $app1Name",
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
@@ -808,7 +832,7 @@ fun AppSelectionDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable(enabled = !app2BiometricOnly) {
-                            onAppSelected(group.app2PackageName)
+                            onAppSelected(group.app2PackageName, false)
                         },
                     colors = CardDefaults.cardColors(
                         containerColor = if (app2BiometricOnly) Color(0xFF1b2a40) else Color(0xFF0f3460)
@@ -824,7 +848,9 @@ fun AppSelectionDialog(
                             Image(
                                 bitmap = app2Icon.toBitmap().asImageBitmap(),
                                 contentDescription = app2Name,
-                                modifier = Modifier.size(40.dp)
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .alpha(if (app2BiometricOnly) 0.35f else 1f)
                             )
                         }
 
@@ -845,6 +871,19 @@ fun AppSelectionDialog(
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(top = 2.dp)
                                 )
+                                TextButton(
+                                    onClick = {
+                                        onAppSelected(group.app2PackageName, true)
+                                    },
+                                    modifier = Modifier.padding(top = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Click to make backup ${prettyAuthType(group.app2LockType)} for $app2Name",
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }

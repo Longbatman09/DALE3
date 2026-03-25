@@ -107,6 +107,7 @@ class AppLockAccessibilityService : AccessibilityService() {
         if (packageName.isBlank() || packageName == this.packageName) return
 
         refreshProtectedPackageMapIfNeeded()
+        cleanupExpiredUnlockTimestamps(System.currentTimeMillis())
         val groupId = protectedPackageToGroupId[packageName]
 
         if (groupId == null) {
@@ -148,7 +149,6 @@ class AppLockAccessibilityService : AccessibilityService() {
         }
 
         lastForegroundPackage = currentPackage
-
         cleanupExpiredUnlockTimestamps(now)
 
         val unlockTime = unlockTimestamps[currentPackage]
@@ -170,25 +170,11 @@ class AppLockAccessibilityService : AccessibilityService() {
                 lockInProgress.remove(currentPackage)
                 return
             }
-
             clearSessionStateForPackage(currentPackage)
-            Log.d(TAG, "Cleared stale unlocking state for $currentPackage")
         }
 
         if (currentPackage in unlockedSessions) {
-            val latestEvent = sharedPrefs.getLatestActivityEventForPackage(groupId, currentPackage)
-            if (latestEvent != "OPENED") {
-                clearSessionStateForPackage(currentPackage)
-                Log.d(TAG, "Forced relock for $currentPackage due to latestEvent=$latestEvent")
-            }
-
             val leftAt = backgroundSince[currentPackage]
-            if (leftAt == null) {
-                if (currentPackage in unlockedSessions) {
-                    return
-                }
-            }
-
             if (leftAt != null) {
                 val awayDuration = now - leftAt
                 if (awayDuration < exitGracePeriodMs) {
@@ -196,8 +182,10 @@ class AppLockAccessibilityService : AccessibilityService() {
                     return
                 }
 
-                unlockedSessions.remove(currentPackage)
-                backgroundSince.remove(currentPackage)
+                // Grace period expired - finalize closure and remove session
+                finalizeAppClosed(currentPackage, groupId)
+            } else {
+                return // Still in session and no background recorded
             }
         }
 
@@ -213,10 +201,19 @@ class AppLockAccessibilityService : AccessibilityService() {
 
     private fun cleanupExpiredUnlockTimestamps(now: Long) {
         val iterator = unlockTimestamps.entries.iterator()
+        val expiredPackages = mutableListOf<String>()
         while (iterator.hasNext()) {
             val entry = iterator.next()
             if (now - entry.value > unlockGracePeriodMs) {
+                expiredPackages.add(entry.key)
                 iterator.remove()
+            }
+        }
+
+        if (expiredPackages.isNotEmpty()) {
+            for (pkg in expiredPackages) {
+                // Prevent stale cross-unlock state from suppressing future CLOSED logs.
+                unlockingApps.remove(pkg)
             }
         }
     }
@@ -277,25 +274,35 @@ class AppLockAccessibilityService : AccessibilityService() {
 
     private fun shouldTriggerLockFromLastActivity(groupId: String, packageName: String): Boolean {
         val latestEvent = sharedPrefs.getLatestActivityEventForPackage(groupId, packageName)
-        val shouldTrigger = latestEvent == null || latestEvent == "CLOSED"
-        if (!shouldTrigger) {
-            Log.d(TAG, "Lock suppressed for $packageName; latest activity event=$latestEvent")
-        }
-        return shouldTrigger
+        return latestEvent == null || latestEvent == "CLOSED"
     }
 
     private fun markProtectedAppClosed(pkg: String, closedAtMs: Long, reason: String) {
         if (pkg in unlockingApps) return
 
-        val insertedAt = backgroundSince.putIfAbsent(pkg, closedAtMs)
-        if (insertedAt == null) {
-            protectedPackageToGroupId[pkg]?.let { groupId ->
+        val groupId = resolveGroupIdForPackage(pkg)
+        if (groupId != null) {
+            val latestEvent = sharedPrefs.getLatestActivityEventForPackage(groupId, pkg)
+            if (latestEvent != "CLOSED") {
                 saveActivityLog(groupId, pkg, "CLOSED")
                 Log.d(TAG, "Logged CLOSED for $pkg (reason=$reason)")
+            } else {
+                Log.d(TAG, "Skipped duplicate CLOSED for $pkg (reason=$reason)")
             }
-            unlockedSessions.remove(pkg)
         }
+
+        // Always reset runtime state so subsequent sessions are tracked cleanly.
+        clearSessionStateForPackage(pkg)
+        backgroundSince[pkg] = closedAtMs
         lockInProgress.remove(pkg)
+    }
+
+    private fun finalizeAppClosed(pkg: String, groupId: String) {
+        saveActivityLog(groupId, pkg, "CLOSED")
+        unlockedSessions.remove(pkg)
+        backgroundSince.remove(pkg)
+        lockInProgress.remove(pkg)
+        Log.d(TAG, "Finalized CLOSED for $pkg and removed session")
     }
 
     private fun clearSessionStateForPackage(pkg: String) {
@@ -304,6 +311,16 @@ class AppLockAccessibilityService : AccessibilityService() {
         backgroundSince.remove(pkg)
         lockInProgress.remove(pkg)
         unlockTimestamps.remove(pkg)
+    }
+
+    private fun resolveGroupIdForPackage(packageName: String): String? {
+        protectedPackageToGroupId[packageName]?.let { return it }
+
+        refreshProtectedPackageMapIfNeeded()
+        return protectedPackageToGroupId[packageName]
+            ?: sharedPrefs.getAllAppGroups().firstOrNull {
+                it.app1PackageName == packageName || it.app2PackageName == packageName
+            }?.id
     }
 
     companion object {

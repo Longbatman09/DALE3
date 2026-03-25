@@ -1,13 +1,11 @@
 package com.example.dale
 
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.biometric.BiometricManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -337,21 +335,6 @@ fun PasswordSetupScreen(
         if (group.groupName.isNotEmpty()) groupName.value = group.groupName
     }
     
-    // Check biometric availability
-    val hasFingerprintSensor = remember {
-        activity.packageManager.hasSystemFeature(PackageManager.FEATURE_FINGERPRINT)
-    }
-    val isBiometricAvailable = remember {
-        if (!hasFingerprintSensor) {
-            false
-        } else {
-            BiometricManager.from(activity).canAuthenticate(
-                BiometricManager.Authenticators.BIOMETRIC_WEAK or
-                    BiometricManager.Authenticators.BIOMETRIC_STRONG
-            ) == BiometricManager.BIOMETRIC_SUCCESS
-        }
-    }
-
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -414,15 +397,10 @@ fun PasswordSetupScreen(
                 if (selectedAuthType.value == null) {
                     AuthenticationTypeSelection(
                         onAuthTypeSelected = { authType ->
-                            if (authType == "BIOMETRICS") {
-                                showBiometricAppsDialog.value = true
-                            } else {
-                                selectedAuthType.value = authType
-                                app1AuthType.value = authType
-                                app2AuthType.value = authType
-                            }
-                        },
-                        isBiometricAvailable = isBiometricAvailable
+                            selectedAuthType.value = authType
+                            app1AuthType.value = authType
+                            app2AuthType.value = authType
+                        }
                     )
                 } else {
                     // Show Pin entry for the current target app
@@ -652,8 +630,7 @@ fun PasswordSetupScreen(
 
 @Composable
 fun AuthenticationTypeSelection(
-    onAuthTypeSelected: (String) -> Unit = {},
-    isBiometricAvailable: Boolean = false
+    onAuthTypeSelected: (String) -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -665,8 +642,7 @@ fun AuthenticationTypeSelection(
         val authTypes = listOf(
             AuthType("PIN", "4 digit PIN", "PIN", iconResourceId = R.drawable.ic_pin, enabled = true),
             AuthType("PASSWORD", "Alphanumeric password", "PWD", iconResourceId = R.drawable.ic_pwd, enabled = true),
-            AuthType("PATTERN", "Draw a pattern", "PAT", iconResourceId = R.drawable.ic_pat, enabled = true),
-            AuthType("BIOMETRICS", "Fingerprint/Face ID", "BIO", iconResourceId = R.drawable.ic_bio, enabled = isBiometricAvailable)
+            AuthType("PATTERN", "Draw a pattern", "PAT", iconResourceId = R.drawable.ic_pat, enabled = true)
         )
 
         authTypes.forEach { authType ->
