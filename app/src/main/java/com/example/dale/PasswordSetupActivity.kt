@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.Lifecycle
@@ -15,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -35,10 +37,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -57,7 +60,6 @@ import com.example.dale.utils.SharedPreferencesManager
 import java.security.MessageDigest
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.Image
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.ui.res.painterResource
 import kotlinx.coroutines.delay
 
@@ -101,7 +103,7 @@ class PasswordSetupActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         // Check if permission was granted after returning from settings
-        if (overlayPermissionRequested && Settings.canDrawOverlays(this)) {
+        if (overlayPermissionRequested && Settings.canDrawOverlays(this) ) {
             completePasswordSetup(groupId)
             overlayPermissionRequested = false
         }
@@ -255,6 +257,16 @@ class PasswordSetupActivity : ComponentActivity() {
         finish()
     }
 
+    fun navigateBackToGroupName() {
+        val intent = Intent(this, AppSelectionActivity::class.java).apply {
+            putExtra(AppSelectionActivity.Companion.EXTRA_RETURN_TO_GROUP_NAME, true)
+            putExtra(AppSelectionActivity.Companion.EXTRA_EDIT_GROUP_ID, groupId)
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        startActivity(intent)
+        finish()
+    }
+
     private fun hashPin(pin: String): String {
         return MessageDigest.getInstance("SHA-256")
             .digest(pin.toByteArray())
@@ -335,6 +347,17 @@ fun PasswordSetupScreen(
         if (group.groupName.isNotEmpty()) groupName.value = group.groupName
     }
     
+    val isSelectingAuth = selectedAuthType.value == null
+    val navigateBackToGroupName: () -> Unit = {
+        (activity as? PasswordSetupActivity)?.navigateBackToGroupName()
+        Unit
+    }
+
+    // Keep hardware back consistent with toolbar back during setup flow.
+    BackHandler {
+        navigateBackToGroupName()
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -363,7 +386,7 @@ fun PasswordSetupScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
-                    onClick = { (activity as? PasswordSetupActivity)?.finish() },
+                    onClick = navigateBackToGroupName,
                     modifier = Modifier.weight(0.1f)
                 ) {
                     Icon(
@@ -378,18 +401,21 @@ fun PasswordSetupScreen(
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF9575CD),
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.weight(0.9f)
+                    modifier = Modifier.weight(0.8f)
                 )
+                Spacer(modifier = Modifier.weight(0.1f))
             }
 
             // Info text
-            Text(
-                text = "Choose your authentication method to secure your dual apps",
-                fontSize = 13.sp,
-                color = Color(0xFFB0B0B0),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
+            if (isSelectingAuth) {
+                Text(
+                    text = "Choose your authentication method to secure your dual apps",
+                    fontSize = 13.sp,
+                    color = Color(0xFFB0B0B0),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+            }
 
             // Content container that takes remaining space
             Box(modifier = Modifier.weight(1f)) {
@@ -490,24 +516,6 @@ fun PasswordSetupScreen(
                                         }
                                     }
                                 }
-                            },
-                            onBackToSelection = {
-                                // go back to auth selection, clear stored credentials
-                                selectedAuthType.value = null
-                                targetAppIndex.value = 1
-                                firstAppCredential.value = null
-                                app1Credential.value = null
-                                app2Credential.value = null
-                                app1AuthType.value = null
-                                app2AuthType.value = null
-                                app1BackupPin.value = ""
-                                app2BackupPin.value = ""
-                                app1BackupType.value = "PIN"
-                                app2BackupType.value = "PIN"
-                                groupBackupType.value = null
-                                pendingCredentialApps.clear()
-                                activeCredentialApp.value = null
-                                showBiometricBackupPinDialog.value = null
                             }
                         )
                     }
@@ -719,8 +727,7 @@ fun CredentialEntryScreen(
     authType: String = "PIN",
     forAppName: String = "App",
     forbiddenCredential: String? = null,
-    onCredentialConfirmed: (String) -> Unit = {},
-    onBackToSelection: () -> Unit = {}
+    onCredentialConfirmed: (String) -> Unit = {}
 ) {
     val normalizedType = authType.uppercase()
     val isPinMode = normalizedType == "PIN"
@@ -800,132 +807,123 @@ fun CredentialEntryScreen(
     }
 
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState()),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Row(
+        // Title & step text
+        Text(
+            text = if (step.value == 0) {
+                "Enter " + when {
+                    isPinMode -> "PIN"
+                    isPatternMode -> "Pattern"
+                    else -> "Password"
+                } + " for $forAppName"
+            } else {
+                "Confirm " + when {
+                    isPinMode -> "PIN"
+                    isPatternMode -> "Pattern"
+                    else -> "Password"
+                } + " for $forAppName"
+            },
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF9575CD),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+
+        Text(
+            text = "Step ${step.value + 1} of 2",
+            fontSize = 12.sp,
+            color = Color(0xFFB0B0B0),
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+
+        // Keep pattern pad near the bottom for better thumb reach.
+        if (isPatternMode) {
+            Spacer(modifier = Modifier.weight(1f))
+        }
+
+        // Credential visual (PIN dots / pattern pad)
+        if (isPinMode) {
+            PinDisplayBox(
+                pin = currentValue,
+                modifier = Modifier
+                    .padding(bottom = 12.dp)
+                    .height(72.dp)
+                    .fillMaxWidth()
+            )
+        } else if (isPatternMode) {
+            PatternCredentialBox(
+                onPatternDrawn = { drawnPattern ->
+                    if (step.value == 0) {
+                        firstInput.value = drawnPattern.take(maxLength)
+                    } else {
+                        confirmInput.value = drawnPattern.take(maxLength)
+                    }
+                    advanceWithValue(drawnPattern)
+                },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBackToSelection) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = Color.White
-                    )
-                }
-            }
-
-            Text(
-                text = if (step.value == 0) {
-                    "Enter ${if (isPinMode) "PIN" else if (isPatternMode) "Pattern" else "Password"} for $forAppName"
-                } else {
-                    "Confirm ${if (isPinMode) "PIN" else if (isPatternMode) "Pattern" else "Password"} for $forAppName"
-                },
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF9575CD),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(bottom = 6.dp)
+                    .height(380.dp)
             )
-
             Text(
-                text = "Step ${step.value + 1} of 2",
+                text = "Draw pattern with at least 4 dots",
                 fontSize = 12.sp,
                 color = Color(0xFFB0B0B0),
-                modifier = Modifier.padding(bottom = 18.dp)
+                modifier = Modifier.padding(top = 6.dp, bottom = 4.dp)
             )
+        }
 
-            if (isPinMode) {
-                PinDisplayBox(
-                    pin = currentValue,
-                    modifier = Modifier.padding(bottom = 18.dp)
-                )
-            } else if (isPatternMode) {
-                Spacer(modifier = Modifier.height(78.dp))
+        // Error message (if any)
+        if (errorMessage.value.isNotEmpty()) {
+            Text(
+                text = errorMessage.value,
+                fontSize = 12.sp,
+                color = Color(0xFFFF6B6B),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        } else {
+            Spacer(modifier = Modifier.height(8.dp))
+        }
 
-                PatternCredentialBox(
-                    onPatternDrawn = { drawnPattern ->
-                        if (step.value == 0) {
-                            firstInput.value = drawnPattern.take(maxLength)
-                        } else {
-                            confirmInput.value = drawnPattern.take(maxLength)
-                        }
-                        advanceWithValue(drawnPattern)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp)
-                        .padding(bottom = 16.dp)
-                )
-
-                Text(
-                    text = "Draw pattern with at least 4 dots",
-                    fontSize = 12.sp,
-                    color = Color(0xFFB0B0B0),
-                    modifier = Modifier.padding(bottom = 10.dp)
-                )
-            }
-
-            if (errorMessage.value.isNotEmpty()) {
-                Text(
-                    text = errorMessage.value,
-                    fontSize = 12.sp,
-                    color = Color(0xFFFF6B6B),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(bottom = 12.dp)
-                )
-            }
-
+        // For password mode only, show a compact password field (no scrolling)
+        if (!isPinMode && !isPatternMode) {
             OutlinedTextField(
                 value = currentState.value,
                 onValueChange = { value ->
-                    currentState.value = if (isPinMode) {
-                        value.filter { it.isDigit() }.take(maxLength)
-                    } else {
-                        value.take(maxLength)
-                    }
+                    currentState.value = value.take(maxLength)
                 },
                 visualTransformation = PasswordVisualTransformation(),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = if (isPinMode) KeyboardType.NumberPassword else KeyboardType.Password,
+                    keyboardType = KeyboardType.Password,
                     imeAction = ImeAction.Done
                 ),
-                label = { Text(if (isPinMode) "4 digit PIN" else "Password (min 6 chars)") },
+                label = { Text("Password (min 6 chars)") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp)
                     .focusRequester(focusRequester)
-                    .alpha(if (isPinMode || isPatternMode) 0f else 1f)
             )
 
-            androidx.compose.runtime.LaunchedEffect(step.value, isPinMode, isPatternMode) {
-                if (isPatternMode) return@LaunchedEffect
+            LaunchedEffect(step.value) {
                 delay(120)
                 focusRequester.requestFocus()
                 keyboardController?.show()
             }
-        }
 
-        if (!isPatternMode) {
+            Spacer(modifier = Modifier.height(16.dp))
+
             Button(
-                onClick = {
-                    advanceWithValue(currentValue)
-                },
+                onClick = { advanceWithValue(currentValue) },
                 enabled = isButtonEnabled,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp)
-                    .padding(bottom = 16.dp),
+                    .height(56.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Purple40,
@@ -940,6 +938,32 @@ fun CredentialEntryScreen(
                     color = if (isButtonEnabled) Color.White else Color.White.copy(alpha = 0.38f)
                 )
             }
+        }
+
+        // Spacer to push keypad down but keep everything on a single page
+        if (isPinMode) {
+            Spacer(modifier = Modifier.weight(1f))
+        }
+
+        // PIN keypad at bottom – same style as lock screen, non-scrollable
+        if (isPinMode) {
+            VirtualNumberKeypad(
+                onNumberClick = { number ->
+                    if (currentState.value.length < maxLength) {
+                        currentState.value += number
+                        errorMessage.value = ""
+                    }
+                },
+                onBackspace = {
+                    if (currentState.value.isNotEmpty()) {
+                        currentState.value = currentState.value.dropLast(1)
+                        errorMessage.value = ""
+                    }
+                },
+                onConfirm = { advanceWithValue(currentValue) },
+                isConfirmEnabled = isButtonEnabled,
+                confirmLabel = if (step.value == 0) "Next" else "Confirm"
+            )
         }
     }
 }
@@ -992,7 +1016,6 @@ fun PatternCredentialBox(
 ) {
     Card(
         modifier = modifier
-            .height(330.dp)
             .shadow(elevation = 8.dp, shape = RoundedCornerShape(12.dp)),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF2a2a3e))
@@ -1000,7 +1023,7 @@ fun PatternCredentialBox(
         PatternLockPad(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(18.dp),
+                .padding(24.dp),
             enabled = true,
             onPatternDrawn = onPatternDrawn
         )
@@ -1232,4 +1255,110 @@ fun BiometricBackupCredentialDialog(
         },
         confirmButton = {}
     )
+}
+
+@Composable
+fun VirtualNumberKeypad(
+    onNumberClick: (String) -> Unit,
+    onBackspace: () -> Unit,
+    onConfirm: () -> Unit,
+    isConfirmEnabled: Boolean = true,
+    confirmLabel: String = "Confirm"
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(top = 4.dp, bottom = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Rows 1-3: Numbers 1-9 – centered like lock screen keypad
+        for (row in 0..2) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center
+            ) {
+                for (col in 1..3) {
+                    val number = (row * 3) + col
+                    NumberPadButton(
+                        number = number.toString(),
+                        onClick = { onNumberClick(number.toString()) },
+                        enabled = true
+                    )
+                }
+            }
+        }
+
+        // Bottom row: spacer, 0, backspace – same structure as lock screen keypad
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            // Left spacer cell to align 0 and backspace with keypad grid
+            Spacer(modifier = Modifier.size(76.dp).padding(6.dp))
+
+            NumberPadButton(
+                number = "0",
+                onClick = { onNumberClick("0") },
+                enabled = true
+            )
+
+            NumberPadButton(
+                number = "⌫",
+                onClick = onBackspace,
+                enabled = true
+            )
+        }
+
+        // Confirm Button (kept as-is, full width below keypad)
+        Button(
+            onClick = onConfirm,
+            enabled = isConfirmEnabled,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .padding(top = 4.dp, bottom = 2.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Purple40,
+                disabledContainerColor = Color(0xFF4A3B66),
+                disabledContentColor = Color.White.copy(alpha = 0.7f)
+            )
+        ) {
+            Text(
+                text = confirmLabel,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isConfirmEnabled) Color.White else Color.White.copy(alpha = 0.7f)
+            )
+        }
+    }
+}
+
+@Composable
+fun NumberPadButton(
+    number: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true
+) {
+    Box(
+        modifier = Modifier
+            .size(76.dp)
+            .padding(6.dp)
+            .shadow(
+                elevation = if (enabled) 3.dp else 0.dp,
+                shape = CircleShape
+            )
+            .clip(CircleShape)
+            .background(if (enabled) Color(0xFF0F315C) else Color(0xFF0A213F))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = number,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (enabled) Color.White else Color(0xFF6D7B8F)
+        )
+    }
 }

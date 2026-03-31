@@ -195,7 +195,7 @@ private fun IntroVideoScreen(onFinished: () -> Unit) {
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
                 .offset(y = (-40).dp)
-                .size(77.dp)
+                .size(90.dp)
         ) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),

@@ -194,6 +194,27 @@ class SharedPreferencesManager private constructor(context: Context) {
     fun setIntroShown(shown: Boolean) {
         sharedPreferences.edit().putBoolean(KEY_INTRO_SHOWN, shown).apply()
     }
+    
+    /**
+     * Get trigger excluded apps (apps that won't trigger lock on other apps)
+     */
+    fun getTriggerExcludedApps(): Set<String> {
+        // For now, return empty set - can be expanded for advanced features
+        return emptySet()
+    }
+    
+    /**
+     * Get all locked apps from all groups
+     */
+    fun getAllLockedApps(): Set<String> {
+        val lockedApps = mutableSetOf<String>()
+        val groups = getAllAppGroups()
+        for (group in groups) {
+            lockedApps.add(group.app1PackageName)
+            lockedApps.add(group.app2PackageName)
+        }
+        return lockedApps
+    }
 
     companion object {
         private const val PREFS_NAME = "DALE_PREFS"

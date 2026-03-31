@@ -4,7 +4,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -32,10 +31,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -59,6 +54,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -107,7 +103,7 @@ fun GroupSettingsScreen(
     val currentGroup = group
 
     val resolvedGroupName = when {
-        !currentGroup?.groupName.isNullOrBlank() -> currentGroup?.groupName.orEmpty()
+        currentGroup != null && currentGroup.groupName.isNotBlank() -> currentGroup.groupName
         groupName.isNotBlank() -> groupName
         else -> "Unknown Group"
     }
@@ -210,7 +206,7 @@ fun GroupSettingsScreen(
                         } else {
                             "Update PIN for this group"
                         },
-                        icon = Icons.Default.Lock,
+                        iconResourceId = R.drawable.CHANGE,
                         onClick = { showAppSelection.value = true }
                     )
 
@@ -221,7 +217,7 @@ fun GroupSettingsScreen(
                             !isFingerprintAvailable -> "Add a fingerprint in device settings first"
                             else -> "Enable fingerprint unlock per app"
                         },
-                        icon = Icons.Default.Settings,
+                        iconResourceId = R.drawable.ic_bio,
                         enabled = hasFingerprintSensor,
                         onClick = {
                             showFingerprintDialog.value = true
@@ -231,7 +227,7 @@ fun GroupSettingsScreen(
                     SettingsCard(
                         title = "Change Group Name",
                         subtitle = "Rename this group",
-                        icon = Icons.Default.Edit,
+                        iconResourceId = R.drawable.PEN,
                         onClick = { showRenameDialog.value = true }
                     )
 
@@ -239,7 +235,7 @@ fun GroupSettingsScreen(
                     SettingsCard(
                         title = "App Logs",
                         subtitle = "Activity logs & usage statistics",
-                        icon = Icons.Default.Settings,
+                        iconResourceId = R.drawable.LOGS,
                         onClick = {
                             val intent = Intent(activity, AppLogsActivity::class.java)
                             intent.putExtra("GROUP_ID", currentGroup.id)
@@ -252,7 +248,7 @@ fun GroupSettingsScreen(
                     SettingsCard(
                         title = "Customisation",
                         subtitle = "Screen lock type and appearance",
-                        icon = Icons.Default.Settings,
+                        iconResourceId = R.drawable.BRUSH,
                         onClick = {
                             val intent = Intent(activity, CustomisationActivity::class.java)
                             intent.putExtra("GROUP_ID", currentGroup.id)
@@ -265,9 +261,8 @@ fun GroupSettingsScreen(
                     SettingsCard(
                         title = "Delete Group",
                         subtitle = "Remove this group permanently",
-                        icon = Icons.Default.Delete,
-                        onClick = { showDeleteConfirmation.value = true },
-                        iconTint = Color(0xFFFF5252)
+                        iconResourceId = R.drawable.BIN,
+                        onClick = { showDeleteConfirmation.value = true }
                     )
                 }
             } else {
@@ -526,6 +521,7 @@ private fun FingerprintPolicyRow(
     }
 }
 
+@Suppress("NewApi")
 private fun openBiometricEnrollmentSettings(activity: ComponentActivity) {
     try {
         val enrollIntent = Intent(Settings.ACTION_BIOMETRIC_ENROLL).apply {
@@ -646,10 +642,9 @@ fun RenameGroupDialog(
 fun SettingsCard(
     title: String,
     subtitle: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconResourceId: Int,
     onClick: () -> Unit,
-    enabled: Boolean = true,
-    iconTint: Color = Purple80
+    enabled: Boolean = true
 ) {
     Card(
         modifier = Modifier
@@ -667,11 +662,11 @@ fun SettingsCard(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = icon,
+            Image(
+                painter = painterResource(id = iconResourceId),
                 contentDescription = title,
-                tint = if (enabled) iconTint else Color.Gray,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.size(32.dp),
+                alpha = if (enabled) 1f else 0.5f
             )
 
             Spacer(modifier = Modifier.width(16.dp))
@@ -710,7 +705,7 @@ fun AppSelectionDialog(
     val app1Icon = remember {
         try {
             activity.packageManager.getApplicationIcon(group.app1PackageName)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }
@@ -718,7 +713,7 @@ fun AppSelectionDialog(
     val app2Icon = remember {
         try {
             activity.packageManager.getApplicationIcon(group.app2PackageName)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }
@@ -728,7 +723,7 @@ fun AppSelectionDialog(
             activity.packageManager.getApplicationLabel(
                 activity.packageManager.getApplicationInfo(group.app1PackageName, 0)
             ).toString()
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             group.app1PackageName
         }
     }
@@ -738,7 +733,7 @@ fun AppSelectionDialog(
             activity.packageManager.getApplicationLabel(
                 activity.packageManager.getApplicationInfo(group.app2PackageName, 0)
             ).toString()
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             group.app2PackageName
         }
     }

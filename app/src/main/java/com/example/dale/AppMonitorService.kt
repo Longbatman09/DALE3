@@ -28,7 +28,7 @@ class AppMonitorService : Service() {
     private val checkIntervalMs = 400L
     private var isPolling = false
 
-    // ...existing code...
+    // Session state tracking
     private val unlockedSessions = mutableSetOf<String>()
     private val unlockingApps = mutableSetOf<String>()
     private val backgroundSince = mutableMapOf<String, Long>()
@@ -39,7 +39,7 @@ class AppMonitorService : Service() {
     private val unlockGracePeriodMs = 5000L
     private val exitGracePeriodMs = 2000L
 
-    // Cached package -> groupId map, refreshed periodically.
+    // Cached package -> groupId map, refreshed periodically
     private var protectedPackageToGroupId: Map<String, String> = emptyMap()
     private var lastGroupRefreshMs = 0L
     private val groupRefreshIntervalMs = 2000L
@@ -91,8 +91,6 @@ class AppMonitorService : Service() {
                         backgroundSince.remove(destinationPackage)
                         unlockTimestamps[sourcePackage] = now
                         unlockTimestamps[destinationPackage] = now
-                        // Immediately mark destination as an unlocked session so
-                        // the monitor never re-shows the lock screen for it.
                         unlockedSessions.add(destinationPackage)
                         unlockingApps.add(destinationPackage)
                         Log.d(TAG, "Cross-unlock broadcast completed: $sourcePackage -> $destinationPackage")
@@ -138,7 +136,7 @@ class AppMonitorService : Service() {
         }
         ContextCompat.registerReceiver(this, unlockReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
 
-        // Start from "now" so stale historical usage events do not generate fake closes.
+        // Start from "now" so stale historical usage events do not generate fake closes
         lastUsageEventTimestamp = System.currentTimeMillis()
 
         startPolling()
@@ -204,10 +202,10 @@ class AppMonitorService : Service() {
 
         val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return null
 
-        // Requested strategy: try top activity from running tasks first.
-        detectFromRunningTasks(am, protectedPackages)?.let { return it }
+        // METHOD 2 DISABLED: Skip Running Tasks API
+        // detectFromRunningTasks(am, protectedPackages)?.let { return it }
 
-        // Fallback path for devices/ROMs where running tasks is restricted.
+        // Fallback path for devices/ROMs where running tasks is restricted
         return detectFromRunningProcesses(am, protectedPackages)
     }
 
@@ -242,8 +240,9 @@ class AppMonitorService : Service() {
                 eventType == UsageEvents.Event.ACTIVITY_PAUSED ||
                 eventType == UsageEvents.Event.ACTIVITY_STOPPED
 
+            // Check for app closing
             if (isBackgroundEvent && protectedPackages.contains(pkg)) {
-                markProtectedAppClosed(pkg, event.timeStamp, "usage_background")
+                Log.d(TAG, "Background event for $pkg")
             }
 
             if (!isForegroundEvent) continue
@@ -451,7 +450,6 @@ class AppMonitorService : Service() {
                 return
             }
 
-            // Stale unlocking state can happen if unlock broadcast/order is interrupted.
             clearSessionStateForPackage(currentPackage)
             Log.d(TAG, "Cleared stale unlocking state for $currentPackage")
         }
@@ -460,7 +458,6 @@ class AppMonitorService : Service() {
             val latestEvent = SharedPreferencesManager.getInstance(this)
                 .getLatestActivityEventForPackage(groupId, currentPackage)
             if (latestEvent != "OPENED") {
-                // CLOSED/no-history should always force a relock path.
                 clearSessionStateForPackage(currentPackage)
                 Log.d(TAG, "Forced relock for $currentPackage due to latestEvent=$latestEvent")
             }
@@ -637,3 +634,4 @@ class AppMonitorService : Service() {
         val stableForegroundPolls: Int
     )
 }
+

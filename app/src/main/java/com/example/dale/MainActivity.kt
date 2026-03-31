@@ -34,9 +34,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -288,6 +290,7 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
     var isMenuOpen by remember { mutableStateOf(false) }
     var showDestroyConfirmation by remember { mutableStateOf(false) }
     var showDestroyingScreen by remember { mutableStateOf(false) }
+    var showAbout by remember { mutableStateOf(false) }
     var protectionActive by remember { mutableStateOf(false) }
     var protectionEnabled by remember { mutableStateOf(sharedPrefs.isProtectionEnabled()) }
     var showProtectionDisableConfirmation by remember { mutableStateOf(false) }
@@ -391,6 +394,7 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
     // Destroying Loading Screen
     if (showDestroyingScreen) {
         DestroyingLoadingScreen(
+            modifier = modifier,
             onComplete = {
                 sharedPrefs.clearAllData()
                 activity?.let {
@@ -404,15 +408,24 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
         return
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(
-                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                    colors = listOf(Color(0xFF1a1a2e), Color(0xFF16213e))
+    // Show About Screen in full screen instead of dialog
+    if (showAbout) {
+        AboutScreen(
+            modifier = modifier,
+            onClose = { showAbout = false },
+            activity = hostActivity
+        )
+    } else {
+        // Main content
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(Color(0xFF1a1a2e), Color(0xFF16213e))
+                    )
                 )
-            )
-    ) {
+        ) {
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
@@ -572,6 +585,8 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
                 onMenuItemClick = { menuItem ->
                     if (menuItem == "Destroy") {
                         showDestroyConfirmation = true
+                    } else if (menuItem == "About") {
+                        showAbout = true
                     }
                     isMenuOpen = false
                 }
@@ -599,6 +614,7 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
                 tint = Color.White,
                 modifier = Modifier.size(32.dp)
             )
+        }
         }
     }
 }
@@ -728,6 +744,15 @@ fun SideMenu(
 
             Spacer(modifier = Modifier.weight(1f))
 
+            // About Button
+            MenuItem(
+                text = "About",
+                icon = "ℹ️",
+                onClick = { onMenuItemClick("About") }
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
             // Destroy DALE Button at bottom
             MenuItem(
                 text = "Destroy DALE",
@@ -773,7 +798,10 @@ fun MenuItem(
 }
 
 @Composable
-fun DestroyingLoadingScreen(onComplete: () -> Unit) {
+fun DestroyingLoadingScreen(
+    modifier: Modifier = Modifier,
+    onComplete: () -> Unit
+) {
     val dotState = remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) {
@@ -794,7 +822,7 @@ fun DestroyingLoadingScreen(onComplete: () -> Unit) {
     }
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .background(
                 brush = androidx.compose.ui.graphics.Brush.verticalGradient(
@@ -824,5 +852,287 @@ fun DestroyingLoadingScreen(onComplete: () -> Unit) {
             color = Color(0xFFFF5252),
             trackColor = Color(0xFF0A2940)
         )
+    }
+}
+
+@Composable
+fun AboutScreen(
+    modifier: Modifier = Modifier,
+    onClose: () -> Unit,
+    activity: ComponentActivity
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                    colors = listOf(Color(0xFF1a1a2e), Color(0xFF16213e))
+                )
+            )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            // Header with back button
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .padding(bottom = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color(0xFF5DADE2),
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                Text(
+                    text = "About",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF5DADE2),
+                    modifier = Modifier.weight(1f),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+
+                Box(modifier = Modifier.size(40.dp))
+            }
+
+            // Scrollable content
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(20.dp)
+            ) {
+                item {
+                    Spacer(modifier = Modifier.height(20.dp))
+                }
+
+                // DALE Logo/Title
+                item {
+                    Text(
+                        text = "DALE",
+                        fontSize = 56.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF5DADE2)
+                    )
+                }
+
+                // Description
+                item {
+                    Text(
+                        text = "Dual App Lock Engine",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFB0B0B0),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+
+                item {
+                    Text(
+                        text = "A powerful app protection suite with dual app support and advanced security features.",
+                        fontSize = 14.sp,
+                        color = Color(0xFFB0B0B0),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        lineHeight = 20.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+
+                // Version
+                item {
+                    Text(
+                        text = "Version 1.0.0",
+                        fontSize = 12.sp,
+                        color = Color(0xFF888888),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                // Divider
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.6f)
+                            .height(1.dp)
+                            .background(Color(0xFF2A5A8A))
+                    )
+                }
+
+                // Credits Section
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF0C1B2F), RoundedCornerShape(12.dp))
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "Credits",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF5DADE2)
+                        )
+
+                        Text(
+                            text = "Solo Developer",
+                            fontSize = 12.sp,
+                            color = Color(0xFFB0B0B0)
+                        )
+
+                        Text(
+                            text = "B. Vishal Chandrakanth",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
+                        )
+
+                        Text(
+                            text = "Coco Copi Developers Limited",
+                            fontSize = 12.sp,
+                            color = Color(0xFF888888),
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                        )
+                    }
+                }
+
+                item {
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
+                // Action Buttons
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // GitHub Button
+                        Button(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    data = "https://github.com".toUri()
+                                }
+                                activity.startActivity(intent)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF0F2A54)
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF3D6EA4))
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "🌐",
+                                    fontSize = 18.sp
+                                )
+                                Text(
+                                    text = "GitHub",
+                                    fontSize = 14.sp,
+                                    color = Color(0xFF5DADE2),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+
+                        // Donate Button
+                        Button(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    data = "https://buymeacoffee.com".toUri()
+                                }
+                                activity.startActivity(intent)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF0F2A54)
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF3D6EA4))
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "❤️",
+                                    fontSize = 18.sp
+                                )
+                                Text(
+                                    text = "Donate",
+                                    fontSize = 14.sp,
+                                    color = Color(0xFF5DADE2),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+
+                        // Feedback Button
+                        Button(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "message/rfc822"
+                                    putExtra(Intent.EXTRA_EMAIL, arrayOf("feedback@dale.app"))
+                                    putExtra(Intent.EXTRA_SUBJECT, "DALE Feedback")
+                                }
+                                activity.startActivity(Intent.createChooser(intent, "Send Feedback"))
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF0F2A54)
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF3D6EA4))
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "💬",
+                                    fontSize = 18.sp
+                                )
+                                Text(
+                                    text = "Feedback",
+                                    fontSize = 14.sp,
+                                    color = Color(0xFF5DADE2),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Spacer(modifier = Modifier.height(20.dp))
+                }
+            }
+        }
     }
 }

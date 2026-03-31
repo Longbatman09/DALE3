@@ -41,7 +41,7 @@ object MonitorStartupHelper {
     }
 
     fun isAccessibilityServiceEnabled(context: Context): Boolean {
-        val expectedService = "${context.packageName}/${com.example.dale.AppLockAccessibilityService::class.java.name}"
+        val expectedService = "${context.packageName}/${com.example.dale.DALEAppLockAccessibilityService::class.java.name}"
         val enabledServices = Settings.Secure.getString(
             context.contentResolver,
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES

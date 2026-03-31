@@ -124,9 +124,49 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="App Lock Monitor" />
         </service>
+
+        <!-- Tier 1: Shizuku Backend Service (Premium) -->
+        <service
+            android:name=".DALEShizukuAppLockService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="App Lock (Shizuku)" />
+        </service>
+
+        <!-- Tier 2: Experimental/UsageStats Backend Service (Reliable, 250ms polling) -->
+        <service
+            android:name=".DALEExperimentalAppLockService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="App Lock (Fast)" />
+        </service>
+
+        <!-- Tier 3: Accessibility Service Backend (Universal fallback) -->
+        <service
+            android:name=".DALEAppLockAccessibilityService"
+            android:enabled="true"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            tools:ignore="AccessibilityPolicy">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- Legacy Accessibility Service (DISABLED - use DALEAppLockAccessibilityService instead) -->
         <service
             android:name=".AppLockAccessibilityService"
-            android:enabled="true"
+            android:enabled="false"
             android:exported="false"
             android:label="@string/app_name"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
