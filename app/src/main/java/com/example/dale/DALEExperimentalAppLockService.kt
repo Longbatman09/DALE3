@@ -16,6 +16,9 @@ import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import androidx.core.content.getSystemService
 import com.example.dale.utils.SharedPreferencesManager
+import com.example.dale.utils.AppActivityLogger
+import com.example.dale.utils.DetectionMethod
+import com.example.dale.utils.DetectionMethodManager
 import java.util.Timer
 import kotlin.concurrent.timerTask
 
@@ -275,25 +278,38 @@ class DALEExperimentalAppLockService : Service() {
         }
     }
     
-    private fun showLockScreen(packageName: String, groupId: String) {
-        try {
-            DALEAppLockManager.isLockScreenShown.set(true)
-            Log.d(TAG, "Showing lock screen for: $packageName")
-            
-            val intent = Intent(this, DrawOverOtherAppsLockScreen::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
-                putExtra("TARGET_PACKAGE", packageName)
-                putExtra("GROUP_ID", groupId)
-            }
-            startActivity(intent)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error showing lock screen", e)
-            DALEAppLockManager.isLockScreenShown.set(false)
-        }
-    }
-    
+     private fun showLockScreen(packageName: String, groupId: String) {
+         try {
+             DALEAppLockManager.isLockScreenShown.set(true)
+             Log.d(TAG, "Showing lock screen for: $packageName")
+
+             // Log the lock screen trigger
+             val sharedPrefs = SharedPreferencesManager.getInstance(this)
+             val group = sharedPrefs.getAppGroup(groupId)
+             if (group != null) {
+                 val appName = if (packageName == group.app1PackageName) group.app1Name else group.app2Name
+                 AppActivityLogger.logLockScreenTriggered(
+                     packageName,
+                     appName,
+                     group.groupName,
+                     "Usage Stats (Experimental)"
+                 )
+             }
+
+             val intent = Intent(this, DrawOverOtherAppsLockScreen::class.java).apply {
+                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                 addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                 addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                 putExtra("TARGET_PACKAGE", packageName)
+                 putExtra("GROUP_ID", groupId)
+             }
+             startActivity(intent)
+         } catch (e: Exception) {
+             Log.e(TAG, "Error showing lock screen", e)
+             DALEAppLockManager.isLockScreenShown.set(false)
+         }
+     }
+
     private fun hasUsagePermission(): Boolean {
         return try {
             val time = System.currentTimeMillis()

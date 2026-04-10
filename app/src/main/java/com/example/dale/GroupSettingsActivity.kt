@@ -206,7 +206,7 @@ fun GroupSettingsScreen(
                         } else {
                             "Update PIN for this group"
                         },
-                        iconResourceId = R.drawable.CHANGE,
+                        iconResourceId = R.drawable.change,
                         onClick = { showAppSelection.value = true }
                     )
 
@@ -227,7 +227,7 @@ fun GroupSettingsScreen(
                     SettingsCard(
                         title = "Change Group Name",
                         subtitle = "Rename this group",
-                        iconResourceId = R.drawable.PEN,
+                        iconResourceId = R.drawable.pen,
                         onClick = { showRenameDialog.value = true }
                     )
 
@@ -235,7 +235,7 @@ fun GroupSettingsScreen(
                     SettingsCard(
                         title = "App Logs",
                         subtitle = "Activity logs & usage statistics",
-                        iconResourceId = R.drawable.LOGS,
+                        iconResourceId = R.drawable.logs,
                         onClick = {
                             val intent = Intent(activity, AppLogsActivity::class.java)
                             intent.putExtra("GROUP_ID", currentGroup.id)
@@ -248,7 +248,7 @@ fun GroupSettingsScreen(
                     SettingsCard(
                         title = "Customisation",
                         subtitle = "Screen lock type and appearance",
-                        iconResourceId = R.drawable.BRUSH,
+                        iconResourceId = R.drawable.brush,
                         onClick = {
                             val intent = Intent(activity, CustomisationActivity::class.java)
                             intent.putExtra("GROUP_ID", currentGroup.id)
@@ -261,7 +261,7 @@ fun GroupSettingsScreen(
                     SettingsCard(
                         title = "Delete Group",
                         subtitle = "Remove this group permanently",
-                        iconResourceId = R.drawable.BIN,
+                        iconResourceId = R.drawable.bin,
                         onClick = { showDeleteConfirmation.value = true }
                     )
                 }
@@ -365,7 +365,16 @@ fun GroupSettingsScreen(
         ) {
             DestroyingLoader(
                 onComplete = {
-                    sharedPrefs.deleteAppGroup(group?.id ?: groupId)
+                    val groupId = group?.id ?: groupId
+
+                    // Remove apps from anti-uninstall when deleting group
+                    group?.let { appGroup ->
+                        val antiUninstallRepo = com.example.dale.utils.AntiUninstallRepository.getInstance(activity)
+                        antiUninstallRepo.removeProtectedPackage(appGroup.app1PackageName)
+                        antiUninstallRepo.removeProtectedPackage(appGroup.app2PackageName)
+                    }
+
+                    sharedPrefs.deleteAppGroup(groupId)
                     activity.finish()
                 }
             )
@@ -638,58 +647,6 @@ fun RenameGroupDialog(
     )
 }
 
-@Composable
-fun SettingsCard(
-    title: String,
-    subtitle: String,
-    iconResourceId: Int,
-    onClick: () -> Unit,
-    enabled: Boolean = true
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick)
-            .shadow(elevation = 4.dp, shape = RoundedCornerShape(8.dp)),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (enabled) Color(0xFF0f3460) else Color(0xFF0f3460).copy(alpha = 0.5f)
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Image(
-                painter = painterResource(id = iconResourceId),
-                contentDescription = title,
-                modifier = Modifier.size(32.dp),
-                alpha = if (enabled) 1f else 0.5f
-            )
-
-            Spacer(modifier = Modifier.width(16.dp))
-
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = title,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (enabled) Color.White else Color.Gray
-                )
-                Text(
-                    text = subtitle,
-                    fontSize = 12.sp,
-                    color = if (enabled) Color.Gray else Color.DarkGray,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            }
-        }
-    }
-}
 
 @Composable
 fun AppSelectionDialog(

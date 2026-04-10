@@ -5,11 +5,15 @@ import android.app.Application
 import android.os.Bundle
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import com.example.dale.utils.AppActivityLogger
 
 class DALEApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Initialize activity logger
+        AppActivityLogger.initialize(this)
 
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {

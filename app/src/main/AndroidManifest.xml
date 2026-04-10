@@ -3,13 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
-    <uses-permission android:name="android.permission.GET_TASKS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
-        tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
@@ -98,6 +93,11 @@
             android:label="Usage Logs"
             android:theme="@style/Theme.DALE" />
         <activity
+            android:name=".DeveloperConsoleActivity"
+            android:exported="false"
+            android:label="Developer Console"
+            android:theme="@style/Theme.DALE" />
+        <activity
             android:name=".DrawOverOtherAppsLockScreen"
             android:exported="false"
             android:excludeFromRecents="true"
@@ -115,39 +115,7 @@
             </intent-filter>
         </receiver>
 
-        <service
-            android:name=".AppMonitorService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="App Lock Monitor" />
-        </service>
-
-        <!-- Tier 1: Shizuku Backend Service (Premium) -->
-        <service
-            android:name=".DALEShizukuAppLockService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="App Lock (Shizuku)" />
-        </service>
-
-        <!-- Tier 2: Experimental/UsageStats Backend Service (Reliable, 250ms polling) -->
-        <service
-            android:name=".DALEExperimentalAppLockService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="App Lock (Fast)" />
-        </service>
-
-        <!-- Tier 3: Accessibility Service Backend (Universal fallback) -->
+        <!-- Tier 3: Accessibility Service Backend (Universal - ONLY DETECTION METHOD) -->
         <service
             android:name=".DALEAppLockAccessibilityService"
             android:enabled="true"

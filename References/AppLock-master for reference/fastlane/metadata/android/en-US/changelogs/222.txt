@@ -1,3 +1,0 @@
-- Keep security logs disabled by default
-- Don't log unnecessary information in the logs
-- Delete old logs after 7 days

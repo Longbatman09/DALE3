@@ -247,8 +247,8 @@ class PasswordSetupActivity : ComponentActivity() {
         // Mark setup as completed
         sharedPrefsManager.setSetupCompleted(true)
 
-        // Start monitoring immediately if the required permissions are already available.
-        MonitorStartupHelper.startMonitoringIfPossible(this)
+        // Accessibility service is now the only detection method
+        // It will automatically start if enabled in accessibility settings
 
         // Navigate to main app
         val intent = Intent(this, MainActivity::class.java)

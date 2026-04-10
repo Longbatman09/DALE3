@@ -353,6 +353,13 @@ class DrawOverOtherAppsLockScreen : FragmentActivity() {
         val timestamp = SimpleDateFormat("dd MMM yyyy, HH:mm:ss", Locale.getDefault())
             .format(Date())
 
+        // Only log if the last event wasn't already CLOSED (deduplicate)
+        val lastEvent = sharedPrefs.getLatestActivityEventForPackage(targetGroupId, closedPackage)
+        if (lastEvent == "CLOSED") {
+            android.util.Log.d("DrawOverOtherAppsLockScreen", "Skipped duplicate CLOSED for $closedPackage")
+            return
+        }
+
         sharedPrefs.saveActivityLog(
             groupId = targetGroupId,
             entry = ActivityLogEntry(

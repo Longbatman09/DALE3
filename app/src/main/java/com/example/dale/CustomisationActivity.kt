@@ -19,7 +19,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -125,7 +124,7 @@ fun CustomisationScreen(
                 SettingsCard(
                     title = "Screen Lock type Change",
                     subtitle = "Choose lock screen style",
-                    icon = Icons.Default.Lock,
+                    iconResourceId = R.drawable.set,
                     onClick = { showLockTypeDialog.value = true }
                 )
             }
@@ -157,3 +156,4 @@ fun CustomisationScreen(
         }
     }
 }
+

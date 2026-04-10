@@ -49,6 +49,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -109,13 +110,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Restart service when returning only if user has protection enabled.
-        val prefs = SharedPreferencesManager.getInstance(this)
-        if (prefs.isProtectionEnabled()) {
-            MonitorStartupHelper.startMonitoringIfPossible(this)
-        } else {
-            MonitorStartupHelper.stopMonitoringService(this)
-        }
+        // Accessibility service is now the only detection method
+        // It will automatically start if enabled in accessibility settings
     }
 }
 
@@ -144,7 +140,7 @@ fun MainGate(modifier: Modifier = Modifier, activity: ComponentActivity) {
         hasBattery = MonitorStartupHelper.isIgnoringBatteryOptimizations(context)
 
         if (hasOverlay) {
-            MonitorStartupHelper.startMonitoringIfPossible(context)
+            // Accessibility service is now the only detection method
         }
     }
 
@@ -317,9 +313,9 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
     LaunchedEffect(refreshTrigger, protectionEnabled) {
         protectionEnabled = sharedPrefs.isProtectionEnabled()
         protectionActive = if (protectionEnabled) {
-            MonitorStartupHelper.startMonitoringIfPossible(context)
+            // Accessibility service is now the only detection method
+            true
         } else {
-            MonitorStartupHelper.stopMonitoringService(context)
             false
         }
     }
@@ -345,7 +341,7 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
                         sharedPrefs.setProtectionEnabled(false)
                         protectionEnabled = false
                         protectionActive = false
-                        MonitorStartupHelper.stopMonitoringService(context)
+                        // Accessibility service is now the only detection method
                     }
                 ) {
                     Text("Turn OFF", color = Color(0xFFFF5252), fontWeight = FontWeight.Bold)
@@ -396,6 +392,11 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
         DestroyingLoadingScreen(
             modifier = modifier,
             onComplete = {
+                // Disable anti-uninstall before destroying data
+                val antiUninstallRepo = com.example.dale.utils.AntiUninstallRepository.getInstance(context)
+                antiUninstallRepo.disableAntiUninstall()
+                antiUninstallRepo.clearAll()
+
                 sharedPrefs.clearAllData()
                 activity?.let {
                     val intent = Intent(it, WelcomeActivity::class.java)
@@ -468,7 +469,8 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
                                 } else {
                                     sharedPrefs.setProtectionEnabled(true)
                                     protectionEnabled = true
-                                    protectionActive = MonitorStartupHelper.startMonitoringIfPossible(context)
+                                    protectionActive = true
+                                    // Accessibility service is now the only detection method
                                 }
                             }
                             .padding(horizontal = 8.dp, vertical = 2.dp)
@@ -579,19 +581,22 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
                 animationSpec = tween(durationMillis = 300)
             ),
             modifier = Modifier.zIndex(2f)
-        ) {
-            SideMenu(
-                onClose = { isMenuOpen = false },
-                onMenuItemClick = { menuItem ->
-                    if (menuItem == "Destroy") {
-                        showDestroyConfirmation = true
-                    } else if (menuItem == "About") {
-                        showAbout = true
-                    }
-                    isMenuOpen = false
-                }
-            )
-        }
+         ) {
+             SideMenu(
+                 onClose = { isMenuOpen = false },
+                 onMenuItemClick = { menuItem ->
+                     if (menuItem == "Destroy") {
+                         showDestroyConfirmation = true
+                     } else if (menuItem == "About") {
+                         showAbout = true
+                     } else if (menuItem == "Developer") {
+                         val intent = Intent(activity, DeveloperConsoleActivity::class.java)
+                         activity.startActivity(intent)
+                     }
+                     isMenuOpen = false
+                 }
+             )
+         }
 
         // Floating Action Button (Add)
         FloatingActionButton(
@@ -713,6 +718,15 @@ fun SideMenu(
     onClose: () -> Unit,
     onMenuItemClick: (String) -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var antiUninstallEnabled by remember { mutableStateOf(false) }
+
+    // Check initial state
+    LaunchedEffect(Unit) {
+        val repo = com.example.dale.utils.AntiUninstallRepository.getInstance(context)
+        antiUninstallEnabled = repo.isAntiUninstallActive()
+    }
+
     Box(
         modifier = Modifier
             .fillMaxHeight()
@@ -742,7 +756,64 @@ fun SideMenu(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // Anti-Uninstall Toggle
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        val repo = com.example.dale.utils.AntiUninstallRepository.getInstance(context)
+                        if (antiUninstallEnabled) {
+                            repo.disableAntiUninstall()
+                        } else {
+                            repo.enableAntiUninstall()
+                        }
+                        antiUninstallEnabled = !antiUninstallEnabled
+                    }
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = "🔒",
+                        fontSize = 20.sp,
+                        modifier = Modifier.padding(end = 16.dp)
+                    )
+                    Text(
+                        text = "Anti-Uninstall",
+                        fontSize = 16.sp,
+                        color = Color.White,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                Switch(
+                    checked = antiUninstallEnabled,
+                    onCheckedChange = {
+                        val repo = com.example.dale.utils.AntiUninstallRepository.getInstance(context)
+                        if (it) {
+                            repo.enableAntiUninstall()
+                        } else {
+                            repo.disableAntiUninstall()
+                        }
+                        antiUninstallEnabled = it
+                    }
+                )
+            }
+
             Spacer(modifier = Modifier.weight(1f))
+
+            // Developer Console Button
+            MenuItem(
+                text = "Developer Console",
+                icon = "🔧",
+                onClick = { onMenuItemClick("Developer") }
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             // About Button
             MenuItem(
