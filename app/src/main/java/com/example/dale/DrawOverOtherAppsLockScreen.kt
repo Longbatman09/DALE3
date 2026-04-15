@@ -328,6 +328,16 @@ class DrawOverOtherAppsLockScreen : FragmentActivity() {
                 timestamp = timestamp
             )
         )
+        
+        // ✅ STEP 1: Store the last opened protected app with its group
+        sharedPrefs.saveLastOpenedApp(
+            packageName = openedPackage,
+            groupId = targetGroupId,
+            groupName = group.groupName,
+            appName = appName
+        )
+        
+        android.util.Log.d("ActivityLog", "✅ Saved last opened app: $appName ($openedPackage) in group ${group.groupName}")
     }
 
     private fun recordAppClosedLog(groupId: String?, closedPackage: String) {
@@ -353,9 +363,9 @@ class DrawOverOtherAppsLockScreen : FragmentActivity() {
         val timestamp = SimpleDateFormat("dd MMM yyyy, HH:mm:ss", Locale.getDefault())
             .format(Date())
 
-        // Only log if the last event wasn't already CLOSED (deduplicate)
+        // ✅ FIX #6: Improved deduplication logic with null safety
         val lastEvent = sharedPrefs.getLatestActivityEventForPackage(targetGroupId, closedPackage)
-        if (lastEvent == "CLOSED") {
+        if (lastEvent?.uppercase(Locale.ROOT) == "CLOSED") {
             android.util.Log.d("DrawOverOtherAppsLockScreen", "Skipped duplicate CLOSED for $closedPackage")
             return
         }

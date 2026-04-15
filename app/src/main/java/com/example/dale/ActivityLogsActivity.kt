@@ -28,8 +28,15 @@ class ActivityLogsActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val groupId = intent.getStringExtra("GROUP_ID") ?: ""
-        val groupName = intent.getStringExtra("GROUP_NAME") ?: ""
+        val groupId = intent.getStringExtra("GROUP_ID")
+        val groupName = intent.getStringExtra("GROUP_NAME")
+
+        // ✅ FIX #2: Validate intent extras to prevent crashes and data corruption
+        if (groupId.isNullOrEmpty() || groupName.isNullOrEmpty()) {
+            android.util.Log.e("ActivityLogsActivity", "Missing required extras: GROUP_ID or GROUP_NAME")
+            finish()
+            return
+        }
 
         setContent {
             DALETheme {
@@ -141,16 +148,19 @@ fun ActivityLogsScreen(
 
 @Composable
 fun ActivityLogItem(log: ActivityLogEntry) {
-    val lineColor = if (log.event == "OPENED") {
-        Color(0x332ECC71)
-    } else {
-        Color(0x33E74C3C)
+    // ✅ FIX #3: Proper event type handling for all event types
+    val lineColor = when (log.event.uppercase()) {
+        "OPENED" -> Color(0x332ECC71)                    // Green
+        "CLOSED" -> Color(0x33E74C3C)                    // Red
+        "LOCK_SCREEN_TRIGGERED" -> Color(0x33FFC107)    // Yellow/Orange
+        else -> Color(0x33757575)                        // Gray (unknown)
     }
 
-    val textColor = if (log.event == "OPENED") {
-        Color(0xFF8DF6B5)
-    } else {
-        Color(0xFFFFA3A3)
+    val textColor = when (log.event.uppercase()) {
+        "OPENED" -> Color(0xFF8DF6B5)                    // Light green
+        "CLOSED" -> Color(0xFFFFA3A3)                    // Light red
+        "LOCK_SCREEN_TRIGGERED" -> Color(0xFFFFE082)    // Light yellow
+        else -> Color(0xFFBDBDBD)                        // Light gray
     }
 
     Row(

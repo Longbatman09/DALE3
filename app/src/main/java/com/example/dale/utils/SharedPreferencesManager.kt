@@ -2,10 +2,13 @@ package com.example.dale.utils
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import com.example.dale.ActivityLogEntry
 import com.example.dale.AppGroup
 import com.example.dale.UsageLogEntry
 import com.google.gson.Gson
+import com.google.gson.JsonParseException
+import com.google.gson.JsonSyntaxException
 import com.google.gson.reflect.TypeToken
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -99,6 +102,8 @@ class SharedPreferencesManager private constructor(context: Context) {
 
     // ── Activity Logs ────────────────────────────────────────────────────────
 
+    // ✅ FIX #5: Add thread safety with synchronized keyword
+    @Synchronized
     fun saveActivityLog(groupId: String, entry: ActivityLogEntry) {
         val key = "activity_logs_$groupId"
         val existing = getActivityLogs(groupId).toMutableList()
@@ -108,17 +113,56 @@ class SharedPreferencesManager private constructor(context: Context) {
         sharedPreferences.edit().putString(key, json).apply()
     }
 
+    // ✅ FIX #1: Improve GSON error handling to catch casting exceptions
     fun getActivityLogs(groupId: String): List<ActivityLogEntry> {
         val json = sharedPreferences.getString("activity_logs_$groupId", null) ?: return emptyList()
-        val type = object : TypeToken<List<ActivityLogEntry>>() {}.type
-        return try { gson.fromJson(json, type) } catch (e: Exception) { emptyList() }
+
+        return try {
+            // Validate JSON format before deserializing
+            if (!json.startsWith("[")) {
+                android.util.Log.e("SharedPrefsManager", "Invalid JSON format for activity logs: $groupId (not array)")
+                sharedPreferences.edit().remove("activity_logs_$groupId").apply()  // Clear corrupted data
+                return emptyList()
+            }
+
+            val type = object : TypeToken<List<ActivityLogEntry>>() {}.type
+            val logs = gson.fromJson<List<ActivityLogEntry>>(json, type)
+
+            // Validate result
+            if (logs == null) {
+                android.util.Log.w("SharedPrefsManager", "Deserialized null for activity logs: $groupId")
+                return emptyList()
+            }
+
+            logs
+        } catch (e: com.google.gson.JsonSyntaxException) {
+            android.util.Log.e("SharedPrefsManager", "JSON Syntax error reading activity logs for $groupId", e)
+            sharedPreferences.edit().remove("activity_logs_$groupId").apply()  // Clear corrupted data
+            emptyList()
+        } catch (e: com.google.gson.JsonParseException) {
+            android.util.Log.e("SharedPrefsManager", "JSON Parse error reading activity logs for $groupId", e)
+            sharedPreferences.edit().remove("activity_logs_$groupId").apply()  // Clear corrupted data
+            emptyList()
+        } catch (e: java.lang.ClassCastException) {
+            android.util.Log.e("SharedPrefsManager", "Type casting error reading activity logs for $groupId (JsonPrimitive instead of JsonArray)", e)
+            sharedPreferences.edit().remove("activity_logs_$groupId").apply()  // Clear corrupted data
+            emptyList()
+        } catch (e: Exception) {
+            android.util.Log.e("SharedPrefsManager", "Unexpected error reading activity logs for $groupId", e)
+            emptyList()
+        }
     }
 
     fun getLatestActivityEventForPackage(groupId: String, packageName: String): String? {
-        return getActivityLogs(groupId)
-            .firstOrNull { it.packageName == packageName }
-            ?.event
-            ?.uppercase(Locale.ROOT)
+        return try {
+            getActivityLogs(groupId)
+                .firstOrNull { it.packageName == packageName }
+                ?.event
+                ?.takeIf { it.isNotBlank() }  // ✅ Ensure non-empty
+        } catch (e: Exception) {
+            android.util.Log.e("SharedPrefsManager", "Error getting latest activity event for $packageName", e)
+            null
+        }
     }
 
     fun clearActivityLogs(groupId: String) {
@@ -195,14 +239,69 @@ class SharedPreferencesManager private constructor(context: Context) {
         sharedPreferences.edit().putBoolean(KEY_INTRO_SHOWN, shown).apply()
     }
     
-    /**
-     * Get trigger excluded apps (apps that won't trigger lock on other apps)
-     */
-    fun getTriggerExcludedApps(): Set<String> {
-        // For now, return empty set - can be expanded for advanced features
-        return emptySet()
-    }
-    
+     /**
+      * Get trigger excluded apps (apps that won't trigger lock on other apps)
+      */
+     fun getTriggerExcludedApps(): Set<String> {
+         // For now, return empty set - can be expanded for advanced features
+         return emptySet()
+     }
+
+     // ── Last Opened App Tracking (Step 1 & 2) ────────────────────────────────────
+
+     /**
+      * Store the last opened protected app and its group
+      * Used to detect when app closes (home launcher detection)
+      */
+     fun saveLastOpenedApp(packageName: String, groupId: String, groupName: String, appName: String) {
+         sharedPreferences.edit()
+             .putString("last_opened_app_package", packageName)
+             .putString("last_opened_app_group_id", groupId)
+             .putString("last_opened_app_group_name", groupName)
+             .putString("last_opened_app_name", appName)
+             .apply()
+     }
+
+     /**
+      * Get the last opened protected app package name
+      */
+     fun getLastOpenedAppPackage(): String? {
+         return sharedPreferences.getString("last_opened_app_package", null)
+     }
+
+     /**
+      * Get the last opened app's group ID
+      */
+     fun getLastOpenedAppGroupId(): String? {
+         return sharedPreferences.getString("last_opened_app_group_id", null)
+     }
+
+     /**
+      * Get the last opened app's group name
+      */
+     fun getLastOpenedAppGroupName(): String? {
+         return sharedPreferences.getString("last_opened_app_group_name", null)
+     }
+
+     /**
+      * Get the last opened app's name
+      */
+     fun getLastOpenedAppName(): String? {
+         return sharedPreferences.getString("last_opened_app_name", null)
+     }
+
+     /**
+      * Clear the last opened app tracking (when screen locked, after restart, etc)
+      */
+     fun clearLastOpenedApp() {
+         sharedPreferences.edit()
+             .remove("last_opened_app_package")
+             .remove("last_opened_app_group_id")
+             .remove("last_opened_app_group_name")
+             .remove("last_opened_app_name")
+             .apply()
+     }
+
     /**
      * Get all locked apps from all groups
      */

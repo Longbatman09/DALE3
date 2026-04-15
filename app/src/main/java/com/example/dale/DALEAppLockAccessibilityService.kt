@@ -9,10 +9,14 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.inputmethod.InputMethodManager
 import androidx.core.content.getSystemService
+import com.example.dale.ActivityLogEntry
 import com.example.dale.utils.SharedPreferencesManager
 import com.example.dale.utils.AppActivityLogger
 import com.example.dale.utils.DetectionMethod
 import com.example.dale.utils.DetectionMethodManager
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Tier 3: Accessibility Service Backend
@@ -39,21 +43,28 @@ class DALEAppLockAccessibilityService : AccessibilityService() {
             private set
     }
     
-    private val screenStateReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context?, intent: Intent?) {
-            try {
-                if (intent?.action == Intent.ACTION_SCREEN_OFF) {
-                    Log.d(TAG, "Screen off detected. Resetting app lock state.")
-                    DALEAppLockManager.isLockScreenShown.set(false)
-                    DALEAppLockManager.clearTemporarilyUnlockedApp()
-                    DALEAppLockManager.appUnlockTimes.clear()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in screenStateReceiver", e)
-            }
-        }
-    }
-    
+     private val screenStateReceiver = object : android.content.BroadcastReceiver() {
+         override fun onReceive(context: android.content.Context?, intent: Intent?) {
+             try {
+                 if (intent?.action == Intent.ACTION_SCREEN_OFF) {
+                     Log.d(TAG, "Screen off detected. Resetting app lock state.")
+                     DALEAppLockManager.isLockScreenShown.set(false)
+                     DALEAppLockManager.clearTemporarilyUnlockedApp()
+                     DALEAppLockManager.appUnlockTimes.clear()
+
+                     // ✅ Clear last opened app when screen turns off (session ends)
+                     context?.let {
+                         val sharedPrefs = SharedPreferencesManager.getInstance(it)
+                         sharedPrefs.clearLastOpenedApp()
+                         Log.d("AppDetection", "🔒 Cleared last opened app on screen off")
+                     }
+                 }
+             } catch (e: Exception) {
+                 Log.e(TAG, "Error in screenStateReceiver", e)
+             }
+         }
+     }
+
     override fun onCreate() {
          super.onCreate()
          try {
@@ -164,23 +175,39 @@ class DALEAppLockAccessibilityService : AccessibilityService() {
          val isHomeScreen = isHomeScreen(event)
          val isSamsungHomeScreen = isSamsungHomeScreenOpened(event)
 
-         when {
-             isSamsungHomeScreen -> {
-                 Log.d(TAG, "Home launcher detected: ${event.packageName}")
-                 Log.d("AppDetection", "🏠 HOME_LAUNCHER_OPENED (${event.packageName})")
+          when {
+              isSamsungHomeScreen -> {
+                  Log.d(TAG, "Home launcher detected: ${event.packageName}")
+                  Log.d("AppDetection", "🏠 HOME_LAUNCHER_OPENED (${event.packageName})")
 
-                 // ALWAYS log the last app as closed when home launcher detected
-                 if (lastForegroundPackage.isNotEmpty() && lastForegroundPackage != event.packageName?.toString()) {
-                     Log.d("AppDetection", "📤 Logging app closed: $lastForegroundPackage")
-                     val sharedPrefs = SharedPreferencesManager.getInstance(applicationContext)
-                     logAppClosedIfProtected(lastForegroundPackage, sharedPrefs)
-                 }
+                  // ✅ STEP 2 & 3: Use last opened app from storage instead of local variable
+                  val sharedPrefs = SharedPreferencesManager.getInstance(applicationContext)
+                  val lastOpenedPackage = sharedPrefs.getLastOpenedAppPackage()
+                  val lastOpenedGroupId = sharedPrefs.getLastOpenedAppGroupId()
+                  val lastOpenedGroupName = sharedPrefs.getLastOpenedAppGroupName()
+                  val lastOpenedAppName = sharedPrefs.getLastOpenedAppName()
 
-                 // Now clear the unlocked state
-                 recentsOpen = false
-                 clearTemporarilyUnlockedAppIfNeeded()
-                 lastForegroundPackage = ""
-             }
+                  if (!lastOpenedPackage.isNullOrEmpty() && !lastOpenedGroupId.isNullOrEmpty()) {
+                      Log.d("AppDetection", "📤 Logging app closed: $lastOpenedPackage (group: $lastOpenedGroupName)")
+
+                      // ✅ STEP 3: Check if last log is OPENED before logging CLOSED
+                      logAppClosedIfProtected(
+                          packageName = lastOpenedPackage,
+                          groupId = lastOpenedGroupId,
+                          groupName = lastOpenedGroupName ?: lastOpenedPackage,
+                          appName = lastOpenedAppName ?: lastOpenedPackage,
+                          sharedPrefs = sharedPrefs
+                      )
+
+                      // Clear after logging
+                      sharedPrefs.clearLastOpenedApp()
+                  }
+
+                  // Now clear the unlocked state
+                  recentsOpen = false
+                  clearTemporarilyUnlockedAppIfNeeded()
+                  lastForegroundPackage = ""
+              }
 
              isRecentlyOpened -> {
                  Log.d(TAG, "Entering recents")
@@ -188,17 +215,32 @@ class DALEAppLockAccessibilityService : AccessibilityService() {
                  recentsOpen = true
              }
 
-             isHomeScreen -> {
-                 Log.d(TAG, "On home screen")
-                 Log.d("AppDetection", "🏠 HOME_SCREEN_OPENED - User on home screen")
-                 recentsOpen = false
-                 clearTemporarilyUnlockedAppIfNeeded()
+              isHomeScreen -> {
+                  Log.d(TAG, "On home screen")
+                  Log.d("AppDetection", "🏠 HOME_SCREEN_OPENED - User on home screen")
+                  recentsOpen = false
+                  clearTemporarilyUnlockedAppIfNeeded()
 
-                 if (lastForegroundPackage.isNotEmpty()) {
-                     logAppClosedIfProtected(lastForegroundPackage, SharedPreferencesManager.getInstance(applicationContext))
-                     lastForegroundPackage = ""
-                 }
-             }
+                  // ✅ Also use last opened app tracking here
+                  val sharedPrefs = SharedPreferencesManager.getInstance(applicationContext)
+                  val lastOpenedPackage = sharedPrefs.getLastOpenedAppPackage()
+                  val lastOpenedGroupId = sharedPrefs.getLastOpenedAppGroupId()
+                  val lastOpenedGroupName = sharedPrefs.getLastOpenedAppGroupName()
+                  val lastOpenedAppName = sharedPrefs.getLastOpenedAppName()
+
+                  if (!lastOpenedPackage.isNullOrEmpty() && !lastOpenedGroupId.isNullOrEmpty()) {
+                      logAppClosedIfProtected(
+                          packageName = lastOpenedPackage,
+                          groupId = lastOpenedGroupId,
+                          groupName = lastOpenedGroupName ?: lastOpenedPackage,
+                          appName = lastOpenedAppName ?: lastOpenedPackage,
+                          sharedPrefs = sharedPrefs
+                      )
+                      sharedPrefs.clearLastOpenedApp()
+                  }
+
+                  lastForegroundPackage = ""
+              }
 
              isAppSwitchedFromRecents(event) -> {
                  Log.d(TAG, "App switched from recents")
@@ -282,7 +324,33 @@ class DALEAppLockAccessibilityService : AccessibilityService() {
 
          // Log app closed if previous app was in a protected group
          if (triggeringPackage.isNotEmpty()) {
-             logAppClosedIfProtected(triggeringPackage, sharedPrefs)
+             // ✅ Fixed: Find group info before logging closed
+             try {
+                 val appGroups = sharedPrefs.getAllAppGroups()
+                 for (group in appGroups) {
+                     if (triggeringPackage == group.app1PackageName) {
+                         logAppClosedIfProtected(
+                             packageName = triggeringPackage,
+                             groupId = group.id,
+                             groupName = group.groupName,
+                             appName = group.app1Name,
+                             sharedPrefs = sharedPrefs
+                         )
+                         break
+                     } else if (triggeringPackage == group.app2PackageName) {
+                         logAppClosedIfProtected(
+                             packageName = triggeringPackage,
+                             groupId = group.id,
+                             groupName = group.groupName,
+                             appName = group.app2Name,
+                             sharedPrefs = sharedPrefs
+                         )
+                         break
+                     }
+                 }
+             } catch (e: Exception) {
+                 Log.e(TAG, "Error logging app closed for $triggeringPackage", e)
+             }
          }
 
          // Log app opened if current app is in a protected group
@@ -323,102 +391,134 @@ class DALEAppLockAccessibilityService : AccessibilityService() {
          }
      }
 
-     private fun logAppClosedIfProtected(packageName: String, sharedPrefs: SharedPreferencesManager) {
-         try {
-             Log.d("AppDetection", "🔍 Checking if $packageName is in any protected group...")
-             val appGroups = sharedPrefs.getAllAppGroups()
-             Log.d("AppDetection", "📊 Total groups found: ${appGroups.size}")
+      private fun logAppClosedIfProtected(
+          packageName: String,
+          groupId: String,
+          groupName: String,
+          appName: String,
+          sharedPrefs: SharedPreferencesManager
+      ) {
+          try {
+              Log.d("AppDetection", "🔍 Checking if $packageName should be logged as closed...")
 
-             for (group in appGroups) {
-                 Log.d("AppDetection", "  Checking group: ${group.groupName} (app1: ${group.app1PackageName}, app2: ${group.app2PackageName})")
+              // ✅ STEP 3: Check if last log entry for this package is "OPENED"
+              // If it's already "CLOSED", skip logging to prevent duplicates
+              val lastEvent = sharedPrefs.getLatestActivityEventForPackage(groupId, packageName)
 
-                 if (packageName == group.app1PackageName) {
-                     val message = "🔒 APP_CLOSED: ${group.app1Name} ($packageName) from group '${group.groupName}' [Accessibility Service]"
-                     Log.d("AppDetection", message)
-                     Log.d("AppDetection", "📝 Calling AppActivityLogger.logAppClosed()")
-                     AppActivityLogger.logAppClosed(
-                         packageName,
-                         group.app1Name,
-                         group.groupName,
-                         "Accessibility Service"
-                     )
-                     Log.d("AppDetection", "✅ App close logged successfully for app1")
-                     return
-                 }
-                 if (packageName == group.app2PackageName) {
-                     val message = "🔒 APP_CLOSED: ${group.app2Name} ($packageName) from group '${group.groupName}' [Accessibility Service]"
-                     Log.d("AppDetection", message)
-                     Log.d("AppDetection", "📝 Calling AppActivityLogger.logAppClosed()")
-                     AppActivityLogger.logAppClosed(
-                         packageName,
-                         group.app2Name,
-                         group.groupName,
-                         "Accessibility Service"
-                     )
-                     Log.d("AppDetection", "✅ App close logged successfully for app2")
-                     return
-                 }
-             }
+              if (lastEvent?.uppercase(Locale.ROOT) == "CLOSED") {
+                  Log.d("AppDetection", "⏭️ Skipped logging CLOSED - last event was already CLOSED for $packageName")
+                  return
+              }
 
-             Log.d("AppDetection", "ℹ️ App $packageName not found in any protected group - not logging as closed")
+              if (lastEvent == null) {
+                  Log.d("AppDetection", "⚠️ No previous log found for $packageName - will log CLOSED anyway")
+              } else {
+                  Log.d("AppDetection", "✅ Last event was $lastEvent - safe to log CLOSED")
+              }
 
-         } catch (e: Exception) {
-             Log.e(TAG, "Error logging app closed: $packageName", e)
-             Log.e("AppDetection", "❌ Exception in logAppClosedIfProtected: ${e.message}")
-             e.printStackTrace()
-         }
-     }
+              // ✅ Now log as CLOSED to activity logs (database)
+              val timestamp = SimpleDateFormat("dd MMM yyyy, HH:mm:ss", Locale.getDefault())
+                  .format(Date())
 
-    private fun checkAndLockApp(packageName: String, triggeringPackage: String, currentTime: Long) {
-         try {
-             // Return if lock screen already showing
-             if (DALEAppLockManager.isLockScreenShown.get()) {
-                 Log.d(TAG, "Lock screen already shown")
-                 Log.d("AppDetection", "🔐 LOCK_SCREEN_ALREADY_SHOWN for $packageName")
-                 return
-             }
+              sharedPrefs.saveActivityLog(
+                  groupId = groupId,
+                  entry = ActivityLogEntry(
+                      appName = appName,
+                      packageName = packageName,
+                      event = "CLOSED",
+                      timestamp = timestamp
+                  )
+              )
 
-             val sharedPrefs = SharedPreferencesManager.getInstance(applicationContext)
+              // Also log to file (security log)
+              AppActivityLogger.logAppClosed(
+                  packageName,
+                  appName,
+                  groupName,
+                  "Home Launcher Detection (Accessibility Service)"
+              )
 
-             // Check if app is in any protected group
-             val appGroups = sharedPrefs.getAllAppGroups()
-             for (group in appGroups) {
-                 if (packageName == group.app1PackageName || packageName == group.app2PackageName) {
-                     val appName = if (packageName == group.app1PackageName) group.app1Name else group.app2Name
+              Log.d("AppDetection", "✅ App closed successfully logged: $appName ($packageName) in group '$groupName'")
 
-                     // Check unlock grace period
-                     val unlockTime = DALEAppLockManager.appUnlockTimes[packageName]
-                     if (unlockTime != null) {
-                         val elapsed = currentTime - unlockTime
-                         if (elapsed < 5000) {
-                             Log.d(TAG, "App in grace period")
-                             Log.d("AppDetection", "⏳ GRACE_PERIOD_ACTIVE for $appName - ${5000 - elapsed}ms remaining")
-                             return
-                         }
-                         DALEAppLockManager.appUnlockTimes.remove(packageName)
-                     }
+          } catch (e: Exception) {
+              Log.e(TAG, "Error logging app closed: $packageName", e)
+              Log.e("AppDetection", "❌ Exception in logAppClosedIfProtected: ${e.message}")
+              e.printStackTrace()
+          }
+      }
 
-                     // Check if temporarily unlocked
-                     if (DALEAppLockManager.isAppTemporarilyUnlocked(packageName)) {
-                         Log.d("AppDetection", "🔓 APP_TEMPORARILY_UNLOCKED: $appName ($packageName)")
-                         return
-                     }
+     private fun checkAndLockApp(packageName: String, triggeringPackage: String, currentTime: Long) {
+          try {
+              val sharedPrefs = SharedPreferencesManager.getInstance(applicationContext)
 
-                     // Show lock screen
-                     Log.d("AppDetection", "🔐 SHOWING_LOCK_SCREEN: $appName ($packageName) from group '${group.groupName}'")
-                     showLockScreen(packageName, group.id)
-                     return
-                 }
-             }
+              // Check if app is in any protected group
+              val appGroups = sharedPrefs.getAllAppGroups()
+              for (group in appGroups) {
+                  if (packageName == group.app1PackageName || packageName == group.app2PackageName) {
+                      val appName = if (packageName == group.app1PackageName) group.app1Name else group.app2Name
 
-             // App is not protected, just log it
-             Log.d("AppDetection", "✅ UNPROTECTED_APP_OPENED: $packageName (not in any group)")
+                      // ✅ NEW ALGORITHM: Check last log entry for this package FIRST
+                      // Do this BEFORE checking isLockScreenShown, because state should be based on actual logs
+                      Log.d("AppDetection", "🔍 Checking last log entry for $packageName...")
+                      val lastEvent = sharedPrefs.getLatestActivityEventForPackage(group.id, packageName)
 
-         } catch (e: Exception) {
-             Log.e(TAG, "Error checking app lock", e)
-             Log.e("AppDetection", "❌ ERROR_IN_CHECK_AND_LOCK: $packageName - ${e.message}")
-         }
-     }
+                      when {
+                          lastEvent?.uppercase(Locale.ROOT) == "OPENED" -> {
+                              // ✅ Last log is OPENED - User is currently using the app
+                              Log.d("AppDetection", "✅ LAST LOG IS OPENED: $appName ($packageName) - User already unlocked, skipping lock screen")
+                              return
+                          }
+                          lastEvent?.uppercase(Locale.ROOT) == "CLOSED" -> {
+                              // ✅ Last log is CLOSED - App was closed, need lock screen
+                              Log.d("AppDetection", "🔒 LAST LOG IS CLOSED: $appName ($packageName) - Triggering lock screen")
+
+                              // ✅ Reset lock screen state if needed (app was closed, so it's a new session)
+                              if (DALEAppLockManager.isLockScreenShown.get()) {
+                                  Log.d("AppDetection", "⚠️ Resetting lock screen state for new session")
+                                  DALEAppLockManager.isLockScreenShown.set(false)
+                              }
+
+                              showLockScreen(packageName, group.id)
+                              return
+                          }
+                          lastEvent == null -> {
+                              // ✅ No previous logs - First time opening, trigger lock screen
+                              Log.d("AppDetection", "⚠️ NO PREVIOUS LOGS: $appName ($packageName) - First time opening, triggering lock screen")
+
+                              // ✅ Reset lock screen state if needed
+                              if (DALEAppLockManager.isLockScreenShown.get()) {
+                                  Log.d("AppDetection", "⚠️ Resetting lock screen state for first-time opening")
+                                  DALEAppLockManager.isLockScreenShown.set(false)
+                              }
+
+                              showLockScreen(packageName, group.id)
+                              return
+                          }
+                          else -> {
+                              // Unknown event type, trigger lock screen for safety
+                              Log.d("AppDetection", "❓ UNKNOWN EVENT TYPE: $appName ($packageName) - Last event: $lastEvent - Triggering lock screen")
+
+                              // ✅ Reset lock screen state if needed
+                              if (DALEAppLockManager.isLockScreenShown.get()) {
+                                  Log.d("AppDetection", "⚠️ Resetting lock screen state for unknown event")
+                                  DALEAppLockManager.isLockScreenShown.set(false)
+                              }
+
+                              showLockScreen(packageName, group.id)
+                              return
+                          }
+                      }
+                  }
+              }
+
+              // App is not protected, just log it
+              Log.d("AppDetection", "✅ UNPROTECTED_APP_OPENED: $packageName (not in any group)")
+
+          } catch (e: Exception) {
+              Log.e(TAG, "Error checking app lock", e)
+              Log.e("AppDetection", "❌ ERROR_IN_CHECK_AND_LOCK: $packageName - ${e.message}")
+          }
+      }
 
       private fun showLockScreen(packageName: String, groupId: String) {
           try {
