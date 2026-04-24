@@ -51,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -391,17 +392,45 @@ fun FingerprintSelectionDialog(
     onDismiss: () -> Unit,
     onSaved: (AppGroup) -> Unit
 ) {
-    var app1Enabled by remember(currentGroup.id) { mutableStateOf(currentGroup.app1FingerprintEnabled) }
-    var app2Enabled by remember(currentGroup.id) { mutableStateOf(currentGroup.app2FingerprintEnabled) }
-    var app1BiometricOnly by remember(currentGroup.id) { mutableStateOf(currentGroup.app1FingerprintBiometricOnly) }
-    var app2BiometricOnly by remember(currentGroup.id) { mutableStateOf(currentGroup.app2FingerprintBiometricOnly) }
+    var selectedApp by remember(currentGroup.id) {
+        mutableStateOf(when {
+            currentGroup.app1FingerprintEnabled -> "app1"
+            currentGroup.app2FingerprintEnabled -> "app2"
+            else -> ""
+        })
+    }
+
+    fun getAuthTypeDisplay(lockType: String): String {
+        return when (lockType.uppercase(Locale.ROOT)) {
+            "PATTERN" -> "Pattern"
+            "PASSWORD" -> "Password"
+            else -> "PIN"
+        }
+    }
+
+    // Load app icons
+    val app1Icon = remember {
+        try {
+            activity.packageManager.getApplicationIcon(currentGroup.app1PackageName)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    val app2Icon = remember {
+        try {
+            activity.packageManager.getApplicationIcon(currentGroup.app2PackageName)
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF03193B),
         title = {
             Text(
-                text = "Fingerprint Unlock",
+                text = "Biometric Unlock",
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
@@ -409,7 +438,7 @@ fun FingerprintSelectionDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "Android does not expose individual fingerprint identities to apps. Enable biometric unlock separately for each app.",
+                    text = "Select one app to enable biometric unlock. The backup authentication method will be the same as the group's lock type.",
                     color = Color(0xFFB0B0B0),
                     fontSize = 12.sp
                 )
@@ -426,45 +455,191 @@ fun FingerprintSelectionDialog(
                     }
                 }
 
+                // Policy text
                 Text(
-                    text = "Policy: Biometric only OR Biometric + PIN fallback",
+                    text = "Policy: ${getAuthTypeDisplay(currentGroup.app1LockType)} + Biometric",
                     color = Color(0xFFB0B0B0),
-                    fontSize = 12.sp
+                    fontSize = 11.sp,
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
                 )
 
-                FingerprintPolicyRow(
-                    appName = currentGroup.app1Name,
-                    enabled = app1Enabled,
-                    biometricOnly = app1BiometricOnly,
-                    controlsEnabled = isFingerprintAvailable,
-                    onEnabledChange = {
-                        app1Enabled = it
-                        if (!it) app1BiometricOnly = false
-                    },
-                    onBiometricOnlyChange = { app1BiometricOnly = it }
-                )
+                Spacer(modifier = Modifier.height(8.dp))
 
-                FingerprintPolicyRow(
-                    appName = currentGroup.app2Name,
-                    enabled = app2Enabled,
-                    biometricOnly = app2BiometricOnly,
-                    controlsEnabled = isFingerprintAvailable,
-                    onEnabledChange = {
-                        app2Enabled = it
-                        if (!it) app2BiometricOnly = false
-                    },
-                    onBiometricOnlyChange = { app2BiometricOnly = it }
-                )
+                // OFF Option
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = isFingerprintAvailable) {
+                            selectedApp = ""
+                        },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (selectedApp == "") Color(0xFF0F4A8F) else Color(0xFF0F2A54)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "OFF",
+                            fontSize = 14.sp,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .background(
+                                    color = if (selectedApp == "") Color(0xFF5DADE2) else Color(0xFF546E7A),
+                                    shape = RoundedCornerShape(4.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (selectedApp == "") {
+                                Text("✓", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
+                // App 1 Option
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = isFingerprintAvailable) {
+                            selectedApp = "app1"
+                        },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (selectedApp == "app1") Color(0xFF0F4A8F) else Color(0xFF0F2A54)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            if (app1Icon != null) {
+                                Image(
+                                    bitmap = app1Icon.toBitmap().asImageBitmap(),
+                                    contentDescription = currentGroup.app1Name,
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Text(
+                                text = currentGroup.app1Name,
+                                fontSize = 14.sp,
+                                color = Color.White,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .background(
+                                    color = if (selectedApp == "app1") Color(0xFF5DADE2) else Color(0xFF546E7A),
+                                    shape = RoundedCornerShape(4.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (selectedApp == "app1") {
+                                Text("✓", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
+                // App 2 Option
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = isFingerprintAvailable) {
+                            selectedApp = "app2"
+                        },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (selectedApp == "app2") Color(0xFF0F4A8F) else Color(0xFF0F2A54)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            if (app2Icon != null) {
+                                Image(
+                                    bitmap = app2Icon.toBitmap().asImageBitmap(),
+                                    contentDescription = currentGroup.app2Name,
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Text(
+                                text = currentGroup.app2Name,
+                                fontSize = 14.sp,
+                                color = Color.White,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .background(
+                                    color = if (selectedApp == "app2") Color(0xFF5DADE2) else Color(0xFF546E7A),
+                                    shape = RoundedCornerShape(4.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (selectedApp == "app2") {
+                                Text("✓", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
+                // Helper text
+                if (selectedApp.isNotEmpty()) {
+                    Text(
+                        text = "When authenticating via biometric fails, user will use ${getAuthTypeDisplay(currentGroup.app1LockType)} as backup.",
+                        color = Color(0xFF7DB8DE),
+                        fontSize = 11.sp
+                    )
+                }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
                     val updated = currentGroup.copy(
-                        app1FingerprintEnabled = app1Enabled,
-                        app2FingerprintEnabled = app2Enabled,
-                        app1FingerprintBiometricOnly = app1Enabled && app1BiometricOnly,
-                        app2FingerprintBiometricOnly = app2Enabled && app2BiometricOnly
+                        app1FingerprintEnabled = selectedApp == "app1",
+                        app2FingerprintEnabled = selectedApp == "app2",
+                        app1FingerprintBiometricOnly = false,
+                        app2FingerprintBiometricOnly = false
                     )
                     sharedPrefs.saveAppGroup(updated)
                     onSaved(updated)
@@ -479,55 +654,6 @@ fun FingerprintSelectionDialog(
             }
         }
     )
-}
-
-@Composable
-private fun FingerprintPolicyRow(
-    appName: String,
-    enabled: Boolean,
-    biometricOnly: Boolean,
-    controlsEnabled: Boolean,
-    onEnabledChange: (Boolean) -> Unit,
-    onBiometricOnlyChange: (Boolean) -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F2A54))
-    ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(text = appName, color = Color.White, fontWeight = FontWeight.SemiBold)
-                Switch(
-                    checked = enabled,
-                    onCheckedChange = onEnabledChange,
-                    enabled = controlsEnabled
-                )
-            }
-
-            if (enabled) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (biometricOnly) "Biometric only" else "Biometric + PIN fallback",
-                        color = Color(0xFFB8C7E0),
-                        fontSize = 12.sp
-                    )
-                    Switch(
-                        checked = biometricOnly,
-                        onCheckedChange = onBiometricOnlyChange,
-                        enabled = controlsEnabled
-                    )
-                }
-            }
-        }
-    }
 }
 
 @Suppress("NewApi")
@@ -655,8 +781,8 @@ fun AppSelectionDialog(
     onDismiss: () -> Unit,
     onAppSelected: (String, Boolean) -> Unit
 ) {
-    val app1BiometricOnly = group.app1FingerprintEnabled && group.app1FingerprintBiometricOnly
-    val app2BiometricOnly = group.app2FingerprintEnabled && group.app2FingerprintBiometricOnly
+    val app1HasBiometric = group.app1FingerprintEnabled
+    val app2HasBiometric = group.app2FingerprintEnabled
 
     // Load app icons and names
     val app1Icon = remember {
@@ -721,11 +847,11 @@ fun AppSelectionDialog(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(enabled = !app1BiometricOnly) {
+                        .clickable(enabled = !app1HasBiometric) {
                             onAppSelected(group.app1PackageName, false)
                         },
                     colors = CardDefaults.cardColors(
-                        containerColor = if (app1BiometricOnly) Color(0xFF1b2a40) else Color(0xFF0f3460)
+                        containerColor = if (app1HasBiometric) Color(0xFF1b2a40) else Color(0xFF0f3460)
                     )
                 ) {
                     Row(
@@ -740,7 +866,8 @@ fun AppSelectionDialog(
                                 contentDescription = app1Name,
                                 modifier = Modifier
                                     .size(40.dp)
-                                    .alpha(if (app1BiometricOnly) 0.35f else 1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .alpha(if (app1HasBiometric) 0.35f else 1f)
                             )
                         }
 
@@ -750,30 +877,17 @@ fun AppSelectionDialog(
                             Text(
                                 text = app1Name,
                                 fontSize = 16.sp,
-                                color = if (app1BiometricOnly) Color(0xFFB0BEC5) else Color.White,
+                                color = if (app1HasBiometric) Color(0xFFB0BEC5) else Color.White,
                                 fontWeight = FontWeight.Medium
                             )
-                            if (app1BiometricOnly) {
+                            if (app1HasBiometric) {
                                 Text(
-                                    text = "Biometrics only Policy",
+                                    text = "Biometric + ${prettyAuthType(group.app1LockType)} Backup",
                                     fontSize = 12.sp,
                                     color = Color.White,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(top = 2.dp)
                                 )
-                                TextButton(
-                                    onClick = {
-                                        onAppSelected(group.app1PackageName, true)
-                                    },
-                                    modifier = Modifier.padding(top = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "Click to make backup ${prettyAuthType(group.app1LockType)} for $app1Name",
-                                        color = Color.White,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
                             }
                         }
                     }
@@ -783,11 +897,11 @@ fun AppSelectionDialog(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(enabled = !app2BiometricOnly) {
+                        .clickable(enabled = !app2HasBiometric) {
                             onAppSelected(group.app2PackageName, false)
                         },
                     colors = CardDefaults.cardColors(
-                        containerColor = if (app2BiometricOnly) Color(0xFF1b2a40) else Color(0xFF0f3460)
+                        containerColor = if (app2HasBiometric) Color(0xFF1b2a40) else Color(0xFF0f3460)
                     )
                 ) {
                     Row(
@@ -802,7 +916,8 @@ fun AppSelectionDialog(
                                 contentDescription = app2Name,
                                 modifier = Modifier
                                     .size(40.dp)
-                                    .alpha(if (app2BiometricOnly) 0.35f else 1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .alpha(if (app2HasBiometric) 0.35f else 1f)
                             )
                         }
 
@@ -812,30 +927,17 @@ fun AppSelectionDialog(
                             Text(
                                 text = app2Name,
                                 fontSize = 16.sp,
-                                color = if (app2BiometricOnly) Color(0xFFB0BEC5) else Color.White,
+                                color = if (app2HasBiometric) Color(0xFFB0BEC5) else Color.White,
                                 fontWeight = FontWeight.Medium
                             )
-                            if (app2BiometricOnly) {
+                            if (app2HasBiometric) {
                                 Text(
-                                    text = "Biometrics only Policy",
+                                    text = "Biometric + ${prettyAuthType(group.app2LockType)} Backup",
                                     fontSize = 12.sp,
                                     color = Color.White,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(top = 2.dp)
                                 )
-                                TextButton(
-                                    onClick = {
-                                        onAppSelected(group.app2PackageName, true)
-                                    },
-                                    modifier = Modifier.padding(top = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "Click to make backup ${prettyAuthType(group.app2LockType)} for $app2Name",
-                                        color = Color.White,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
                             }
                         }
                     }

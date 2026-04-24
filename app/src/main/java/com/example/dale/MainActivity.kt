@@ -327,7 +327,7 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
             title = {
                 Text(
                     text = "Turn protection OFF?",
-                    color = Color(0xFF2A0C0C),
+                    color = Color.White,
                     fontWeight = FontWeight.Bold
                 )
             },

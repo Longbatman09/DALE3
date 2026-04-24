@@ -16,5 +16,7 @@ data class AppGroup(
     val app2FingerprintEnabled: Boolean = false,
     val app1FingerprintBiometricOnly: Boolean = false,
     val app2FingerprintBiometricOnly: Boolean = false,
+    val app1PinLength: Int = 0,
+    val app2PinLength: Int = 0,
     val createdAt: Long = System.currentTimeMillis()
 )

@@ -12,6 +12,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -37,6 +38,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +64,8 @@ import java.security.MessageDigest
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.delay
 
 class PasswordSetupActivity : ComponentActivity() {
@@ -115,9 +120,10 @@ class PasswordSetupActivity : ComponentActivity() {
         val appGroup = sharedPrefsManager.getAppGroupForSetup(groupId)
         if (appGroup != null) {
             val hashedPin = hashPin(pin)
+            val pinLength = pin.length
             val newGroup = when (appIndex) {
-                1 -> appGroup.copy(app1LockPin = hashedPin, isLocked = true)
-                2 -> appGroup.copy(app2LockPin = hashedPin, isLocked = true)
+                1 -> appGroup.copy(app1LockPin = hashedPin, app1PinLength = pinLength, isLocked = true)
+                2 -> appGroup.copy(app2LockPin = hashedPin, app2PinLength = pinLength, isLocked = true)
                 else -> appGroup
             }
             sharedPrefsManager.saveAppGroupForSetup(newGroup)
@@ -143,8 +149,10 @@ class PasswordSetupActivity : ComponentActivity() {
             val newGroup = appGroup.copy(
                 app1LockPin = app1HashedCredential,
                 app1LockType = app1NormalizedType,
+                app1PinLength = if (app1NormalizedType == "PIN") app1RawCredential.length else 0,
                 app2LockPin = app2HashedCredential,
                 app2LockType = app2NormalizedType,
+                app2PinLength = if (app2NormalizedType == "PIN") app2RawCredential.length else 0,
                 isLocked = true
             )
             sharedPrefsManager.saveAppGroupForSetup(newGroup)
@@ -160,8 +168,8 @@ class PasswordSetupActivity : ComponentActivity() {
         groupId: String,
         app1Enabled: Boolean,
         app2Enabled: Boolean,
-        app1BiometricOnly: Boolean,
-        app2BiometricOnly: Boolean,
+        app1BiometricOnly: Boolean = false,
+        app2BiometricOnly: Boolean = false,
         app1BackupType: String = "PIN",
         app2BackupType: String = "PIN",
         app1BackupPin: String = "",
@@ -174,40 +182,19 @@ class PasswordSetupActivity : ComponentActivity() {
                 app2BackupType.ifBlank { "PIN" }
             }.uppercase()
 
-            val app1BackupFinal = if (app1Enabled && !app1BiometricOnly) {
-                if (app1BackupPin.isNotEmpty()) hashPin(app1BackupPin) else appGroup.app1LockPin
-            } else if (app1Enabled && app1BiometricOnly) {
-                appGroup.app1LockPin
-            } else {
-                // Non-biometric app in mixed setup uses selected app auth
-                if (app1BackupPin.isNotEmpty()) hashPin(app1BackupPin) else appGroup.app1LockPin
-            }
+            // With new policy: Always use backup credentials (never biometric-only)
+            val app1BackupFinal = if (app1BackupPin.isNotEmpty()) hashPin(app1BackupPin) else appGroup.app1LockPin
+            val app2BackupFinal = if (app2BackupPin.isNotEmpty()) hashPin(app2BackupPin) else appGroup.app2LockPin
 
-            val app2BackupFinal = if (app2Enabled && !app2BiometricOnly) {
-                if (app2BackupPin.isNotEmpty()) hashPin(app2BackupPin) else appGroup.app2LockPin
-            } else if (app2Enabled && app2BiometricOnly) {
-                appGroup.app2LockPin
-            } else {
-                // Non-biometric app in mixed setup uses selected app auth
-                if (app2BackupPin.isNotEmpty()) hashPin(app2BackupPin) else appGroup.app2LockPin
-            }
-
-            val app1TypeFinal = when {
-                app1Enabled && app1BiometricOnly -> "BIOMETRIC"
-                app1Enabled && !app1BiometricOnly -> resolvedBackupType
-                else -> resolvedBackupType
-            }
-            val app2TypeFinal = when {
-                app2Enabled && app2BiometricOnly -> "BIOMETRIC"
-                app2Enabled && !app2BiometricOnly -> resolvedBackupType
-                else -> resolvedBackupType
-            }
+            // Always set lock type to the backup type (never just "BIOMETRIC")
+            val app1TypeFinal = resolvedBackupType
+            val app2TypeFinal = resolvedBackupType
 
             val newGroup = appGroup.copy(
                 app1FingerprintEnabled = app1Enabled,
                 app2FingerprintEnabled = app2Enabled,
-                app1FingerprintBiometricOnly = app1Enabled && app1BiometricOnly,
-                app2FingerprintBiometricOnly = app2Enabled && app2BiometricOnly,
+                app1FingerprintBiometricOnly = false,  // Always false with new policy
+                app2FingerprintBiometricOnly = false,  // Always false with new policy
                 app1LockType = app1TypeFinal,
                 app2LockType = app2TypeFinal,
                 app1LockPin = app1BackupFinal,
@@ -296,7 +283,8 @@ fun PasswordSetupScreen(
     val app2Credential = remember { mutableStateOf<String?>(null) }
     val app1AuthType = remember { mutableStateOf<String?>(null) }
     val app2AuthType = remember { mutableStateOf<String?>(null) }
-    
+    val app1PinLength = remember { mutableStateOf(0) }  // Track App1's PIN digit count
+
     // Store the first app's credential temporarily to compare with the second
     val firstAppCredential = remember { mutableStateOf<String?>(null) }
     
@@ -437,12 +425,16 @@ fun PasswordSetupScreen(
                             authType = selectedAuthType.value ?: "PIN",
                             forAppName = appName,
                             forbiddenCredential = if (targetAppIndex.value == 2) firstAppCredential.value else null,
+                            appIndex = targetAppIndex.value,
+                            app1PinLength = app1PinLength.value,
+                            groupCreatedName = groupName.value,
                             onCredentialConfirmed = { credential ->
                                 val authType = selectedAuthType.value ?: "PIN"
                                 
                                 // Store credential temporarily
                                 if (targetAppIndex.value == 1) {
                                     app1Credential.value = credential
+                                    app1PinLength.value = credential.length  // Store PIN length for App1
                                     app1AuthType.value = authType
                                     app1BackupType.value = authType
                                     app2BackupType.value = authType
@@ -525,6 +517,22 @@ fun PasswordSetupScreen(
 
         // Biometric Apps Selection Dialog
         if (showBiometricAppsDialog.value) {
+            val app1Icon = remember {
+                try {
+                    activity.packageManager.getApplicationIcon(appGroup.value?.app1PackageName ?: "")
+                } catch (_: Exception) {
+                    null
+                }
+            }
+
+            val app2Icon = remember {
+                try {
+                    activity.packageManager.getApplicationIcon(appGroup.value?.app2PackageName ?: "")
+                } catch (_: Exception) {
+                    null
+                }
+            }
+
             BiometricAppsSelectionDialog(
                 app1Name = app1Name.value,
                 app2Name = app2Name.value,
@@ -536,44 +544,30 @@ fun PasswordSetupScreen(
                 onConfirm = {
                     showBiometricAppsDialog.value = false
                     showBiometricBackupDialog.value = true
-                }
+                },
+                app1Icon = app1Icon,
+                app2Icon = app2Icon
             )
         }
 
-        // Biometric Policy Selection Dialog
+        // Skip BiometricPolicyDialog - always use backup policy
         if (showBiometricBackupDialog.value) {
-            BiometricPolicyDialog(
-                app1Name = app1Name.value,
-                app2Name = app2Name.value,
-                app1Enabled = app1BiometricEnabled.value,
-                app2Enabled = app2BiometricEnabled.value,
-                app1BiometricOnly = app1BiometricOnly.value,
-                app2BiometricOnly = app2BiometricOnly.value,
-                onApp1BiometricOnlyChanged = { app1BiometricOnly.value = it },
-                onApp2BiometricOnlyChanged = { app2BiometricOnly.value = it },
-                onDismiss = { showBiometricBackupDialog.value = false },
-                onConfirm = {
-                    showBiometricBackupDialog.value = false
-                    pendingCredentialApps.clear()
-                    groupBackupType.value = null
-                    app1BackupType.value = "PIN"
-                    app2BackupType.value = "PIN"
+            showBiometricBackupDialog.value = false
+            pendingCredentialApps.clear()
+            groupBackupType.value = null
+            app1BackupType.value = "PIN"
+            app2BackupType.value = "PIN"
 
-                    // Ask auth setup for apps that are non-biometric OR biometric+backup
-                    val app1NeedsCredential = !app1BiometricEnabled.value || !app1BiometricOnly.value
-                    val app2NeedsCredential = !app2BiometricEnabled.value || !app2BiometricOnly.value
+            // With the new single-app biometric policy, BOTH apps always need credentials
+            // - The biometric app needs a backup credential
+            // - The non-biometric app needs its regular credential
+            pendingCredentialApps.add(1)
+            pendingCredentialApps.add(2)
 
-                    if (app1NeedsCredential) pendingCredentialApps.add(1)
-                    if (app2NeedsCredential) pendingCredentialApps.add(2)
-
-                    if (pendingCredentialApps.isNotEmpty()) {
-                        activeCredentialApp.value = pendingCredentialApps.removeAt(0)
-                        showBiometricBackupPinDialog.value = activeCredentialApp.value
-                    } else {
-                        finalizeBiometricFlow()
-                    }
-                }
-            )
+            if (pendingCredentialApps.isNotEmpty()) {
+                activeCredentialApp.value = pendingCredentialApps.removeAt(0)
+                showBiometricBackupPinDialog.value = activeCredentialApp.value
+            }
         }
 
         // Backup PIN/PASSWORD/PATTERN Dialogs
@@ -659,6 +653,19 @@ fun AuthenticationTypeSelection(
                 onSelected = { if (authType.enabled) onAuthTypeSelected(authType.name) }
             )
         }
+
+        // Note section
+        Text(
+            text = "💡 Note: You can add biometric unlock after this setup",
+            fontSize = 12.sp,
+            color = Color(0xFF7DB8DE),
+            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+            lineHeight = 16.sp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 12.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
     }
 }
 
@@ -727,17 +734,20 @@ fun CredentialEntryScreen(
     authType: String = "PIN",
     forAppName: String = "App",
     forbiddenCredential: String? = null,
+    appIndex: Int = 1,
+    app1PinLength: Int = 0,
+    groupCreatedName: String = "",
     onCredentialConfirmed: (String) -> Unit = {}
 ) {
     val normalizedType = authType.uppercase()
     val isPinMode = normalizedType == "PIN"
     val isPatternMode = normalizedType == "PATTERN"
     val minLength = when {
-        isPinMode || isPatternMode -> 4
+        isPinMode || isPatternMode -> if (appIndex == 1) 1 else (if (app1PinLength > 0) app1PinLength else 4)
         else -> 6
     }
     val maxLength = when {
-        isPinMode -> 4
+        isPinMode -> if (appIndex == 1) 10 else (if (app1PinLength > 0) app1PinLength else 10)
         isPatternMode -> 9
         else -> 32
     }
@@ -755,11 +765,21 @@ fun CredentialEntryScreen(
     val isButtonEnabled = currentValue.length >= minLength
 
     fun advanceWithValue(inputValue: String) {
-        if (inputValue.length < minLength) {
+        if (appIndex == 1 && isPinMode) {
+            // For App1: No minimum length restriction for PIN
+            if (inputValue.isEmpty()) {
+                errorMessage.value = "Please enter a PIN"
+                return
+            }
+        } else if (inputValue.length < minLength) {
             errorMessage.value = if (isPatternMode) {
                 "Pattern must connect at least 4 dots"
             } else if (isPinMode) {
-                "PIN must be 4 digits"
+                if (appIndex == 2 && app1PinLength > 0) {
+                    "PIN must be $app1PinLength digits"
+                } else {
+                    "PIN must be at least 4 digits"
+                }
             } else {
                 "Password must be at least 6 characters"
             }
@@ -831,7 +851,8 @@ fun CredentialEntryScreen(
             fontWeight = FontWeight.Bold,
             color = Color(0xFF9575CD),
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(bottom = 4.dp)
+            modifier = Modifier.padding(bottom = 4.dp),
+            lineHeight = 22.sp
         )
 
         Text(
@@ -846,15 +867,19 @@ fun CredentialEntryScreen(
             Spacer(modifier = Modifier.weight(1f))
         }
 
-        // Credential visual (PIN dots / pattern pad)
-        if (isPinMode) {
-            PinDisplayBox(
-                pin = currentValue,
-                modifier = Modifier
-                    .padding(bottom = 12.dp)
-                    .height(72.dp)
-                    .fillMaxWidth()
-            )
+         // Credential visual (PIN dots / pattern pad)
+         if (isPinMode) {
+             PinDisplayBox(
+                 pin = currentValue,
+                 appIndex = appIndex,
+                 app1PinLength = app1PinLength,
+                 step = step.value,
+                 firstInputLength = firstInput.value.length,
+                 modifier = Modifier
+                     .padding(top = 24.dp, bottom = 12.dp)
+                     .height(72.dp)
+                     .fillMaxWidth()
+             )
         } else if (isPatternMode) {
             PatternCredentialBox(
                 onPatternDrawn = { drawnPattern ->
@@ -971,8 +996,20 @@ fun CredentialEntryScreen(
 @Composable
 fun PinDisplayBox(
     pin: String,
+    appIndex: Int = 1,
+    app1PinLength: Int = 0,
+    step: Int = 0,
+    firstInputLength: Int = 0,
     modifier: Modifier = Modifier
 ) {
+    // Determine the total number of dots to display
+    val totalDots = when {
+        appIndex == 1 && step == 0 -> pin.length  // App1 Step 1: only show filled dots (dynamic)
+        appIndex == 1 && step == 1 -> firstInputLength  // App1 Step 2: show firstInputLength total (from Step 1)
+        appIndex == 2 && app1PinLength > 0 -> app1PinLength  // App2: show app1PinLength total
+        else -> 10  // Default to 10
+    }
+
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -991,7 +1028,11 @@ fun PinDisplayBox(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                repeat(4) { index -> PinDot(isFilled = index < pin.length) }
+                // Show dots: filled for entered digits, dark for empty positions
+                repeat(totalDots) { index ->
+                    val isFilled = index < pin.length
+                    PinDot(isFilled = isFilled)
+                }
             }
         }
     }
@@ -1003,8 +1044,19 @@ fun PinDot(isFilled: Boolean) {
         modifier = Modifier
             .size(14.dp)
             .background(
-                color = if (isFilled) Color(0xFF9575CD) else Color(0xFF4a4a5e),
+                color = if (isFilled) Color(0xFF9575CD) else Color(0xFF3a3a4e),  // Dark gray for empty
                 shape = RoundedCornerShape(50)
+            )
+            .then(
+                if (!isFilled) {
+                    Modifier.border(
+                        width = 2.dp,
+                        color = Color(0xFF4a4a5e),
+                        shape = RoundedCornerShape(50)
+                    )
+                } else {
+                    Modifier
+                }
             )
     )
 }
@@ -1039,14 +1091,24 @@ fun BiometricAppsSelectionDialog(
     onApp1Changed: (Boolean) -> Unit,
     onApp2Changed: (Boolean) -> Unit,
     onDismiss: () -> Unit,
-    onConfirm: () -> Unit
+    onConfirm: () -> Unit,
+    app1Icon: android.graphics.drawable.Drawable? = null,
+    app2Icon: android.graphics.drawable.Drawable? = null
 ) {
+    var selectedApp by remember {
+        mutableStateOf(when {
+            app1Enabled -> "app1"
+            app2Enabled -> "app2"
+            else -> ""
+        })
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF03193B),
         title = {
             Text(
-                text = "Enable Biometric for Apps",
+                text = "Biometric Unlock",
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
@@ -1054,56 +1116,192 @@ fun BiometricAppsSelectionDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "Select which apps to protect with biometric authentication:",
+                    text = "Select one app to enable biometric unlock. The other app will use the backup authentication method.",
                     color = Color(0xFFB0B0B0),
                     fontSize = 12.sp
                 )
 
-                // App 1 Toggle
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // OFF Option
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F2A54))
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            selectedApp = ""
+                            onApp1Changed(false)
+                            onApp2Changed(false)
+                        },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (selectedApp == "") Color(0xFF0F4A8F) else Color(0xFF0F2A54)
+                    )
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(text = app1Name, color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Switch(
-                            checked = app1Enabled,
-                            onCheckedChange = onApp1Changed
+                        Text(
+                            text = "OFF",
+                            fontSize = 14.sp,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
                         )
+
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .background(
+                                    color = if (selectedApp == "") Color(0xFF5DADE2) else Color(0xFF546E7A),
+                                    shape = RoundedCornerShape(4.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (selectedApp == "") {
+                                Text("✓", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
 
-                // App 2 Toggle
+                // App 1 Option
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F2A54))
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            selectedApp = "app1"
+                            onApp1Changed(true)
+                            onApp2Changed(false)
+                        },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (selectedApp == "app1") Color(0xFF0F4A8F) else Color(0xFF0F2A54)
+                    )
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(text = app2Name, color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Switch(
-                            checked = app2Enabled,
-                            onCheckedChange = onApp2Changed
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            if (app1Icon != null) {
+                                Image(
+                                    bitmap = app1Icon.toBitmap().asImageBitmap(),
+                                    contentDescription = app1Name,
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Text(
+                                text = app1Name,
+                                fontSize = 14.sp,
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .background(
+                                    color = if (selectedApp == "app1") Color(0xFF5DADE2) else Color(0xFF546E7A),
+                                    shape = RoundedCornerShape(4.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (selectedApp == "app1") {
+                                Text("✓", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
+
+                // App 2 Option
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            selectedApp = "app2"
+                            onApp1Changed(false)
+                            onApp2Changed(true)
+                        },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (selectedApp == "app2") Color(0xFF0F4A8F) else Color(0xFF0F2A54)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            if (app2Icon != null) {
+                                Image(
+                                    bitmap = app2Icon.toBitmap().asImageBitmap(),
+                                    contentDescription = app2Name,
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Text(
+                                text = app2Name,
+                                fontSize = 14.sp,
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .background(
+                                    color = if (selectedApp == "app2") Color(0xFF5DADE2) else Color(0xFF546E7A),
+                                    shape = RoundedCornerShape(4.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (selectedApp == "app2") {
+                                Text("✓", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = "Policy: <Auth Type> + Biometric for selected app",
+                    color = Color(0xFF7DB8DE),
+                    fontSize = 11.sp,
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                )
             }
         },
         confirmButton = {
             TextButton(
-                enabled = app1Enabled || app2Enabled,
-                onClick = onConfirm
+                enabled = true,
+                onClick = {
+                    onConfirm()
+                }
             ) {
                 Text("Next")
             }
@@ -1116,104 +1314,6 @@ fun BiometricAppsSelectionDialog(
     )
 }
 
-@Composable
-fun BiometricPolicyDialog(
-    app1Name: String,
-    app2Name: String,
-    app1Enabled: Boolean,
-    app2Enabled: Boolean,
-    app1BiometricOnly: Boolean,
-    app2BiometricOnly: Boolean,
-    onApp1BiometricOnlyChanged: (Boolean) -> Unit,
-    onApp2BiometricOnlyChanged: (Boolean) -> Unit,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF03193B),
-        title = {
-            Text(
-                text = "Biometric Policy",
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    text = "Choose policy: Biometric only OR Biometric + Backup (PIN/Password/Pattern)",
-                    color = Color(0xFFB0B0B0),
-                    fontSize = 12.sp
-                )
-
-                if (app1Enabled) {
-                    BiometricPolicyRow(
-                        appName = app1Name,
-                        biometricOnly = app1BiometricOnly,
-                        onBiometricOnlyChange = onApp1BiometricOnlyChanged
-                    )
-                }
-
-                if (app2Enabled) {
-                    BiometricPolicyRow(
-                        appName = app2Name,
-                        biometricOnly = app2BiometricOnly,
-                        onBiometricOnlyChange = onApp2BiometricOnlyChanged
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text("Next")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
-@Composable
-fun BiometricPolicyRow(
-    appName: String,
-    biometricOnly: Boolean,
-    onBiometricOnlyChange: (Boolean) -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F2A54))
-    ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(text = appName, color = Color.White, fontWeight = FontWeight.SemiBold)
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (biometricOnly) "Biometric only" else "Biometric + Backup",
-                    color = Color(0xFFB8C7E0),
-                    fontSize = 12.sp
-                )
-                Switch(
-                    checked = biometricOnly,
-                    onCheckedChange = onBiometricOnlyChange
-                )
-            }
-        }
-    }
-}
 
 @Composable
 fun BiometricBackupCredentialDialog(
@@ -1289,48 +1389,46 @@ fun VirtualNumberKeypad(
             }
         }
 
-        // Bottom row: spacer, 0, backspace – same structure as lock screen keypad
+        // Bottom row: Backspace, 0, Continue arrow
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center
         ) {
-            // Left spacer cell to align 0 and backspace with keypad grid
-            Spacer(modifier = Modifier.size(76.dp).padding(6.dp))
+            // Backspace button on the left
+            NumberPadButton(
+                number = "⌫",
+                onClick = onBackspace,
+                enabled = true
+            )
 
+            // 0 in the middle
             NumberPadButton(
                 number = "0",
                 onClick = { onNumberClick("0") },
                 enabled = true
             )
 
-            NumberPadButton(
-                number = "⌫",
-                onClick = onBackspace,
-                enabled = true
-            )
-        }
-
-        // Confirm Button (kept as-is, full width below keypad)
-        Button(
-            onClick = onConfirm,
-            enabled = isConfirmEnabled,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .padding(top = 4.dp, bottom = 2.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Purple40,
-                disabledContainerColor = Color(0xFF4A3B66),
-                disabledContentColor = Color.White.copy(alpha = 0.7f)
-            )
-        ) {
-            Text(
-                text = confirmLabel,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isConfirmEnabled) Color.White else Color.White.copy(alpha = 0.7f)
-            )
+            // Continue button with arrow on the right
+            Box(
+                modifier = Modifier
+                    .size(76.dp)
+                    .padding(6.dp)
+                    .shadow(
+                        elevation = if (isConfirmEnabled) 3.dp else 0.dp,
+                        shape = CircleShape
+                    )
+                    .clip(CircleShape)
+                    .background(if (isConfirmEnabled) Color(0xFF9575CD) else Color(0xFF4A3B66))
+                    .clickable(enabled = isConfirmEnabled, onClick = onConfirm),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "→",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isConfirmEnabled) Color.White else Color.White.copy(alpha = 0.7f)
+                )
+            }
         }
     }
 }
