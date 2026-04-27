@@ -50,9 +50,69 @@ fun UsageLogsScreen(
     activity: ComponentActivity
 ) {
     val sharedPrefs = SharedPreferencesManager.getInstance(activity)
-    val usageLogs: List<UsageLogEntry> = remember(groupId) {
-        sharedPrefs.getUsageLogs(groupId)
+    
+    val appGroup = remember(groupId) { sharedPrefs.getAppGroup(groupId) }
+    val usageLogs = remember(groupId) { sharedPrefs.getUsageLogs(groupId) }
+    val activityLogs = remember(groupId) { sharedPrefs.getActivityLogs(groupId) }
+
+    val app1Package = appGroup?.app1PackageName ?: ""
+    val app1Name = appGroup?.app1Name ?: "App 1"
+    
+    val app2Package = appGroup?.app2PackageName ?: ""
+    val app2Name = appGroup?.app2Name ?: "App 2"
+    
+    val app1Unlocks = activityLogs.count { it.packageName == app1Package && it.event == "OPENED" }
+    val app2Unlocks = activityLogs.count { it.packageName == app2Package && it.event == "OPENED" }
+    
+    val formatMs: (Long) -> String = { ms ->
+        val totalSec = ms / 1000
+        val hours = totalSec / 3600
+        val minutes = (totalSec % 3600) / 60
+        val seconds = totalSec % 60
+        when {
+            hours > 0 -> "${hours}h ${minutes}m"
+            minutes > 0 -> "${minutes}m ${seconds}s"
+            else -> "${seconds}s"
+        }
     }
+
+    val dateFormat = java.text.SimpleDateFormat("dd MMM yyyy, HH:mm:ss", java.util.Locale.getDefault())
+
+    var computedApp1Ms = 0L
+    var computedApp2Ms = 0L
+
+    var lastOpenApp1: Long? = null
+    var lastOpenApp2: Long? = null
+
+    // activityLogs are ordered newest to oldest, so reverse to process chronologically
+    activityLogs.reversed().forEach { log ->
+        val time = try { dateFormat.parse(log.timestamp)?.time } catch (e: Exception) { null }
+        if (time != null) {
+            if (log.packageName == app1Package) {
+                if (log.event == "OPENED") {
+                    lastOpenApp1 = time
+                } else if (log.event == "CLOSED" && lastOpenApp1 != null) {
+                    val duration = time - lastOpenApp1!!
+                    if (duration > 0) computedApp1Ms += duration
+                    lastOpenApp1 = null
+                }
+            } else if (log.packageName == app2Package) {
+                if (log.event == "OPENED") {
+                    lastOpenApp2 = time
+                } else if (log.event == "CLOSED" && lastOpenApp2 != null) {
+                    val duration = time - lastOpenApp2!!
+                    if (duration > 0) computedApp2Ms += duration
+                    lastOpenApp2 = null
+                }
+            }
+        }
+    }
+
+    val app1TimeFormatted = formatMs(computedApp1Ms)
+    val app2TimeFormatted = formatMs(computedApp2Ms)
+    
+    val totalTimeMs = computedApp1Ms + computedApp2Ms
+    val totalTimeFormatted = formatMs(totalTimeMs)
 
     Box(
         modifier = Modifier
@@ -99,37 +159,165 @@ fun UsageLogsScreen(
                 }
             }
 
-            if (usageLogs.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Top Rectangle: Total Time Unlocked
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0f3460))
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         Text(
-                            text = "No usage data yet",
+                            text = "Total Time Unlocked",
                             fontSize = 16.sp,
-                            color = Color.Gray,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Medium,
+                            color = Color.LightGray
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Time spent in apps will appear here",
-                            fontSize = 12.sp,
-                            color = Color.DarkGray,
-                            modifier = Modifier.padding(top = 6.dp)
+                            text = totalTimeFormatted,
+                            fontSize = 32.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFBB86FC)
                         )
                     }
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+
+                // Middle Row: Unlocks Count
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    items(items = usageLogs, key = { it.packageName }) { log ->
-                        UsageLogItem(log)
+                    // App 1 Unlocks
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0f3460))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "$app1Name Unlocked",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.LightGray,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "$app1Unlocks",
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+
+                    // App 2 Unlocks
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0f3460))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "$app2Name Unlocked",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.LightGray,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "$app2Unlocks",
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+
+                // Bottom Row: Time Spent
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // App 1 Time Spent
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0f3460))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "Time Spent in $app1Name",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.LightGray,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = app1TimeFormatted,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFBB86FC)
+                            )
+                        }
+                    }
+
+                    // App 2 Time Spent
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0f3460))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "Time Spent in $app2Name",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.LightGray,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = app2TimeFormatted,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFBB86FC)
+                            )
+                        }
                     }
                 }
             }
@@ -137,58 +325,3 @@ fun UsageLogsScreen(
     }
 }
 
-@Composable
-fun UsageLogItem(log: UsageLogEntry) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0f3460))
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = log.appName,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White
-                )
-                Text(
-                    text = log.formattedDuration,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFFBB86FC)
-                )
-            }
-            Text(
-                text = "Last used: ${log.lastUsedDate}",
-                fontSize = 11.sp,
-                color = Color.Gray,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            // Usage progress bar
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Color(0xFF1a1a2e))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(fraction = log.usageFraction.coerceIn(0f, 1f))
-                        .fillMaxHeight()
-                        .background(Color(0xFFBB86FC))
-                )
-            }
-        }
-    }
-}

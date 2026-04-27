@@ -45,6 +45,25 @@ class IntroActivity : ComponentActivity() {
 
         val prefs = SharedPreferencesManager.getInstance(this)
 
+        val currentTime = System.currentTimeMillis()
+        val lastSplashTime = prefs.getLastSplashVideoTime()
+        val cooldownMillis = 30 * 60 * 1000L // 30 minutes
+
+        if (lastSplashTime > 0 && (currentTime - lastSplashTime) in 0 until cooldownMillis) {
+            val destination = if (prefs.isSetupCompleted()) {
+                MainActivity::class.java
+            } else {
+                WelcomeActivity::class.java
+            }
+            startActivity(Intent(this, destination))
+            @Suppress("DEPRECATION")
+            overridePendingTransition(R.anim.fade_in, R.anim.fade_out)
+            finish()
+            return
+        }
+
+        prefs.setLastSplashVideoTime(currentTime)
+
         setContent {
             DALETheme {
                 IntroVideoScreen(

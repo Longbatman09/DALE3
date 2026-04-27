@@ -162,7 +162,7 @@ fun MainGate(modifier: Modifier = Modifier, activity: ComponentActivity) {
         )
         !hasAccessibility -> PermissionWallScreen(
             modifier = modifier,
-            icon = "♿",
+            iconRes = R.drawable.accesibility,
             title = "Enable Accessibility Service",
             description = "DALE now uses accessibility-based app detection for reliable lock triggering.\n\nOpen accessibility settings and enable DALE.",
             buttonText = "Open Accessibility Settings",
@@ -172,7 +172,7 @@ fun MainGate(modifier: Modifier = Modifier, activity: ComponentActivity) {
         )
         !hasBattery -> PermissionWallScreen(
             modifier = modifier,
-            icon = "🔋",
+            iconRes = R.drawable.battery_opt,
             title = "Disable Battery Optimization",
             description = "Battery optimization can kill DALE's background service, making the lock screen stop working.\n\nTap the button below — you'll be taken directly to DALE's battery settings. Select \"Unrestricted\" or \"Don't optimize\".",
             buttonText = "Open Battery Settings for DALE",
@@ -196,7 +196,8 @@ fun MainGate(modifier: Modifier = Modifier, activity: ComponentActivity) {
 @Composable
 fun PermissionWallScreen(
     modifier: Modifier = Modifier,
-    icon: String,
+    icon: String = "",
+    iconRes: Int? = null,
     title: String,
     description: String,
     buttonText: String,
@@ -218,7 +219,15 @@ fun PermissionWallScreen(
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
             // Icon
-            Text(text = icon, fontSize = 56.sp)
+            if (iconRes != null) {
+                Image(
+                    painter = painterResource(id = iconRes),
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp)
+                )
+            } else if (icon.isNotEmpty()) {
+                Text(text = icon, fontSize = 56.sp)
+            }
 
             // Title
             Text(
@@ -392,11 +401,6 @@ fun HomeScreen(modifier: Modifier = Modifier, activity: ComponentActivity? = nul
         DestroyingLoadingScreen(
             modifier = modifier,
             onComplete = {
-                // Disable anti-uninstall before destroying data
-                val antiUninstallRepo = com.example.dale.utils.AntiUninstallRepository.getInstance(context)
-                antiUninstallRepo.disableAntiUninstall()
-                antiUninstallRepo.clearAll()
-
                 sharedPrefs.clearAllData()
                 activity?.let {
                     val intent = Intent(it, WelcomeActivity::class.java)
@@ -718,15 +722,6 @@ fun SideMenu(
     onClose: () -> Unit,
     onMenuItemClick: (String) -> Unit
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var antiUninstallEnabled by remember { mutableStateOf(false) }
-
-    // Check initial state
-    LaunchedEffect(Unit) {
-        val repo = com.example.dale.utils.AntiUninstallRepository.getInstance(context)
-        antiUninstallEnabled = repo.isAntiUninstallActive()
-    }
-
     Box(
         modifier = Modifier
             .fillMaxHeight()
@@ -756,53 +751,6 @@ fun SideMenu(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Anti-Uninstall Toggle
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        val repo = com.example.dale.utils.AntiUninstallRepository.getInstance(context)
-                        if (antiUninstallEnabled) {
-                            repo.disableAntiUninstall()
-                        } else {
-                            repo.enableAntiUninstall()
-                        }
-                        antiUninstallEnabled = !antiUninstallEnabled
-                    }
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        text = "🔒",
-                        fontSize = 20.sp,
-                        modifier = Modifier.padding(end = 16.dp)
-                    )
-                    Text(
-                        text = "Anti-Uninstall",
-                        fontSize = 16.sp,
-                        color = Color.White,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-
-                Switch(
-                    checked = antiUninstallEnabled,
-                    onCheckedChange = {
-                        val repo = com.example.dale.utils.AntiUninstallRepository.getInstance(context)
-                        if (it) {
-                            repo.enableAntiUninstall()
-                        } else {
-                            repo.disableAntiUninstall()
-                        }
-                        antiUninstallEnabled = it
-                    }
-                )
-            }
 
             Spacer(modifier = Modifier.weight(1f))
 
@@ -818,7 +766,8 @@ fun SideMenu(
             // About Button
             MenuItem(
                 text = "About",
-                icon = "ℹ️",
+                iconRes = R.drawable.info,
+                iconSize = 28.dp,
                 onClick = { onMenuItemClick("About") }
             )
 
@@ -827,7 +776,7 @@ fun SideMenu(
             // Destroy DALE Button at bottom
             MenuItem(
                 text = "Destroy DALE",
-                icon = "🗑️",
+                iconRes = R.drawable.bin2,
                 onClick = { onMenuItemClick("Destroy") },
                 isDestructive = true
             )
@@ -840,7 +789,9 @@ fun SideMenu(
 @Composable
 fun MenuItem(
     text: String,
-    icon: String,
+    icon: String = "",
+    iconRes: Int? = null,
+    iconSize: androidx.compose.ui.unit.Dp = 24.dp,
     onClick: () -> Unit,
     isDestructive: Boolean = false
 ) {
@@ -854,11 +805,21 @@ fun MenuItem(
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = icon,
-            fontSize = 20.sp,
-            modifier = Modifier.padding(end = 16.dp)
-        )
+        if (iconRes != null) {
+            Image(
+                painter = painterResource(id = iconRes),
+                contentDescription = null,
+                modifier = Modifier.size(iconSize)
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+        } else if (icon.isNotEmpty()) {
+            Text(
+                text = icon,
+                fontSize = 20.sp,
+                modifier = Modifier.padding(end = 16.dp)
+            )
+        }
+        
         Text(
             text = text,
             fontSize = 16.sp,
@@ -985,19 +946,18 @@ fun AboutScreen(
                     .fillMaxWidth()
                     .weight(1f),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(20.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 item {
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
 
                 // DALE Logo/Title
                 item {
-                    Text(
-                        text = "DALE",
-                        fontSize = 56.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF5DADE2)
+                    Image(
+                        painter = painterResource(id = R.drawable.dale_logo),
+                        contentDescription = "DALE Logo",
+                        modifier = Modifier.height(48.dp)
                     )
                 }
 
@@ -1005,7 +965,7 @@ fun AboutScreen(
                 item {
                     Text(
                         text = "Dual App Lock Engine",
-                        fontSize = 18.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color(0xFFB0B0B0),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -1015,11 +975,11 @@ fun AboutScreen(
                 item {
                     Text(
                         text = "A powerful app protection suite with dual app support and advanced security features.",
-                        fontSize = 14.sp,
+                        fontSize = 12.sp,
                         color = Color(0xFFB0B0B0),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        lineHeight = 20.sp,
-                        modifier = Modifier.padding(horizontal = 16.dp)
+                        lineHeight = 16.sp,
+                        modifier = Modifier.padding(horizontal = 24.dp)
                     )
                 }
 
@@ -1027,7 +987,7 @@ fun AboutScreen(
                 item {
                     Text(
                         text = "Version 1.0.0",
-                        fontSize = 12.sp,
+                        fontSize = 10.sp,
                         color = Color(0xFF888888),
                         fontWeight = FontWeight.Medium
                     )
@@ -1037,7 +997,7 @@ fun AboutScreen(
                 item {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(0.6f)
+                            .fillMaxWidth(0.5f)
                             .height(1.dp)
                             .background(Color(0xFF2A5A8A))
                     )
@@ -1047,35 +1007,35 @@ fun AboutScreen(
                 item {
                     Column(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFF0C1B2F), RoundedCornerShape(12.dp))
+                            .fillMaxWidth(0.85f)
+                            .background(Color(0xFF0C1B2F), RoundedCornerShape(16.dp))
                             .padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
                             text = "Credits",
-                            fontSize = 16.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF5DADE2)
                         )
 
                         Text(
                             text = "Solo Developer",
-                            fontSize = 12.sp,
+                            fontSize = 10.sp,
                             color = Color(0xFFB0B0B0)
                         )
 
                         Text(
                             text = "B. Vishal Chandrakanth",
-                            fontSize = 14.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color.White
                         )
 
                         Text(
                             text = "Coco Copi Developers Limited",
-                            fontSize = 12.sp,
+                            fontSize = 10.sp,
                             color = Color(0xFF888888),
                             fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
                         )
@@ -1083,16 +1043,15 @@ fun AboutScreen(
                 }
 
                 item {
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                 }
 
                 // Action Buttons
                 item {
                     Column(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                            .fillMaxWidth(0.85f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         // GitHub Button
                         Button(
@@ -1104,24 +1063,24 @@ fun AboutScreen(
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(48.dp),
-                            shape = RoundedCornerShape(8.dp),
+                                .height(40.dp),
+                            shape = RoundedCornerShape(20.dp),
                             colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF0F2A54)
                             ),
                             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF3D6EA4))
                         ) {
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
                                     text = "🌐",
-                                    fontSize = 18.sp
+                                    fontSize = 14.sp
                                 )
                                 Text(
                                     text = "GitHub",
-                                    fontSize = 14.sp,
+                                    fontSize = 12.sp,
                                     color = Color(0xFF5DADE2),
                                     fontWeight = FontWeight.Medium
                                 )
@@ -1138,24 +1097,24 @@ fun AboutScreen(
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(48.dp),
-                            shape = RoundedCornerShape(8.dp),
+                                .height(40.dp),
+                            shape = RoundedCornerShape(20.dp),
                             colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF0F2A54)
                             ),
                             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF3D6EA4))
                         ) {
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
                                     text = "❤️",
-                                    fontSize = 18.sp
+                                    fontSize = 14.sp
                                 )
                                 Text(
                                     text = "Donate",
-                                    fontSize = 14.sp,
+                                    fontSize = 12.sp,
                                     color = Color(0xFF5DADE2),
                                     fontWeight = FontWeight.Medium
                                 )
@@ -1174,24 +1133,24 @@ fun AboutScreen(
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(48.dp),
-                            shape = RoundedCornerShape(8.dp),
+                                .height(40.dp),
+                            shape = RoundedCornerShape(20.dp),
                             colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF0F2A54)
                             ),
                             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF3D6EA4))
                         ) {
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
                                     text = "💬",
-                                    fontSize = 18.sp
+                                    fontSize = 14.sp
                                 )
                                 Text(
                                     text = "Feedback",
-                                    fontSize = 14.sp,
+                                    fontSize = 12.sp,
                                     color = Color(0xFF5DADE2),
                                     fontWeight = FontWeight.Medium
                                 )
@@ -1201,7 +1160,7 @@ fun AboutScreen(
                 }
 
                 item {
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
         }

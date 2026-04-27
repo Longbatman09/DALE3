@@ -114,10 +114,14 @@ fun GroupSettingsScreen(
     val showDestroyingLoader = remember { mutableStateOf(false) }
     val showRenameDialog = remember { mutableStateOf(false) }
     val showFingerprintDialog = remember { mutableStateOf(false) }
-    val groupUsesPattern = remember(currentGroup) {
+    val groupLockType = remember(currentGroup) {
         val app1Type = currentGroup?.app1LockType?.uppercase(Locale.ROOT)
         val app2Type = currentGroup?.app2LockType?.uppercase(Locale.ROOT)
-        app1Type == "PATTERN" || app2Type == "PATTERN"
+        when {
+            app1Type == "PATTERN" || app2Type == "PATTERN" -> "PATTERN"
+            app1Type == "PASSWORD" || app2Type == "PASSWORD" -> "PASSWORD"
+            else -> "PIN"
+        }
     }
     val hasFingerprintSensor = remember {
         activity.packageManager.hasSystemFeature(PackageManager.FEATURE_FINGERPRINT)
@@ -201,11 +205,15 @@ fun GroupSettingsScreen(
                 ) {
                     // Change Password Option
                     SettingsCard(
-                        title = if (groupUsesPattern) "Change Pattern" else "Change Password",
-                        subtitle = if (groupUsesPattern) {
-                            "Update pattern for this group"
-                        } else {
-                            "Update PIN for this group"
+                        title = when (groupLockType) {
+                            "PATTERN" -> "Change Pattern"
+                            "PASSWORD" -> "Change Password"
+                            else -> "Change PIN"
+                        },
+                        subtitle = when (groupLockType) {
+                            "PATTERN" -> "Update pattern for this group"
+                            "PASSWORD" -> "Update password for this group"
+                            else -> "Update PIN for this group"
                         },
                         iconResourceId = R.drawable.change,
                         onClick = { showAppSelection.value = true }
@@ -368,12 +376,6 @@ fun GroupSettingsScreen(
                 onComplete = {
                     val groupId = group?.id ?: groupId
 
-                    // Remove apps from anti-uninstall when deleting group
-                    group?.let { appGroup ->
-                        val antiUninstallRepo = com.example.dale.utils.AntiUninstallRepository.getInstance(activity)
-                        antiUninstallRepo.removeProtectedPackage(appGroup.app1PackageName)
-                        antiUninstallRepo.removeProtectedPackage(appGroup.app2PackageName)
-                    }
 
                     sharedPrefs.deleteAppGroup(groupId)
                     activity.finish()

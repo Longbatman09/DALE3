@@ -6,7 +6,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.WindowManager
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.OnBackPressedCallback
@@ -30,24 +29,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
-import androidx.core.graphics.drawable.toBitmap
 import androidx.fragment.app.FragmentActivity
 import com.example.dale.ui.theme.DALETheme
-import com.example.dale.ui.theme.Purple40
-import com.example.dale.ui.theme.Purple80
 import com.example.dale.utils.SharedPreferencesManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -472,17 +464,6 @@ fun LockScreenContent(
     var isVerifying by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    // Load app icon
-    val appIcon = remember(targetPackageName) {
-        try {
-            targetPackageName?.let { packageName ->
-                context.packageManager.getApplicationIcon(packageName)?.toBitmap()?.asImageBitmap()
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     val appGroup = remember(groupId) {
         groupId?.let { sharedPrefs.getAppGroup(it) }
     }
@@ -501,6 +482,7 @@ fun LockScreenContent(
     val normalizedLockType = appInfo.lockType.uppercase()
     val isPatternMode = normalizedLockType == "PATTERN"
     val isPinMode = normalizedLockType == "PIN"
+    val expectedPinLength = (if (appInfo.pinLength > 0) appInfo.pinLength else 4).coerceIn(1, 10)
 
     suspend fun verifyAndUnlock(inputCredential: String) {
         if (isVerifying) return
@@ -565,8 +547,7 @@ fun LockScreenContent(
 
     LaunchedEffect(credentialInput, isPinMode, appInfo.pinLength) {
         if (isPinMode) {
-            val expectedLength = if (appInfo.pinLength > 0) appInfo.pinLength else 4
-            if (credentialInput.length == expectedLength) {
+            if (credentialInput.length == expectedPinLength) {
                 verifyAndUnlock(credentialInput)
             }
         }
@@ -621,21 +602,6 @@ fun LockScreenContent(
             }
 
             val credentialContent: @Composable ColumnScope.() -> Unit = {
-                    // Display app icon if available
-                    if (appIcon != null) {
-                        androidx.compose.foundation.Image(
-                            bitmap = appIcon,
-                            contentDescription = "App icon",
-                            modifier = Modifier
-                                .size(80.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .border(2.dp, Color(0xFF4A77B6), RoundedCornerShape(16.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-
-                        Spacer(modifier = Modifier.height(20.dp))
-                    }
-
                     Box(
                         modifier = Modifier
                             .size(68.dp)
@@ -698,7 +664,7 @@ fun LockScreenContent(
                             horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            repeat(4) { index ->
+                            repeat(expectedPinLength) { index ->
                                 Box(
                                     modifier = Modifier
                                         .size(14.dp)
@@ -717,9 +683,8 @@ fun LockScreenContent(
                     } else if (isPatternMode) {
                         Card(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .height(338.dp)
-                                .padding(top = 20.dp),
+                                .padding(top = 180.dp)
+                                .size(280.dp),
                             shape = RoundedCornerShape(14.dp),
                             colors = CardDefaults.cardColors(containerColor = Color(0xFF132E56)),
                             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x334C78AD))
@@ -806,30 +771,13 @@ fun LockScreenContent(
                     }
                 }
 
-            if (isPinMode && !biometricOnly) {
-                Column(
-                    modifier = credentialCardModifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 18.dp, vertical = 20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    content = credentialContent
-                )
-            } else {
-                Card(
-                    modifier = credentialCardModifier,
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xCC0A2548)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x443D6EA4))
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 18.dp, vertical = 20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        content = credentialContent
-                    )
-                }
-            }
+            Column(
+                modifier = credentialCardModifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                content = credentialContent
+            )
 
             if (isPinMode && !biometricOnly) {
                 Spacer(modifier = Modifier.weight(1f))
@@ -848,11 +796,10 @@ fun LockScreenContent(
                         ) {
                             for (col in 1..3) {
                                 val number = (row * 3) + col
-                                val maxPinLength = if (appInfo.pinLength > 0) appInfo.pinLength else 4
                                 NumberButton(
                                     number = number.toString(),
                                     onClick = {
-                                        if (credentialInput.length < maxPinLength && !isVerifying) {
+                                        if (credentialInput.length < expectedPinLength && !isVerifying) {
                                             credentialInput += number
                                             errorMessage = null
                                         }
@@ -869,11 +816,10 @@ fun LockScreenContent(
                     ) {
                         Spacer(modifier = Modifier.size(76.dp).padding(6.dp))
 
-                        val maxPinLength = if (appInfo.pinLength > 0) appInfo.pinLength else 4
                         NumberButton(
                             number = "0",
                             onClick = {
-                                if (credentialInput.length < maxPinLength && !isVerifying) {
+                                if (credentialInput.length < expectedPinLength && !isVerifying) {
                                     credentialInput += "0"
                                     errorMessage = null
                                 }

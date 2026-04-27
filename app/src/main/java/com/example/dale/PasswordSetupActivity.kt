@@ -7,6 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -419,11 +421,17 @@ fun PasswordSetupScreen(
                 } else {
                     // Show Pin entry for the current target app
                     val appName = if (targetAppIndex.value == 1) app1Name.value else app2Name.value
+                    val appPackageName = if (targetAppIndex.value == 1) {
+                        appGroup.value?.app1PackageName
+                    } else {
+                        appGroup.value?.app2PackageName
+                    }
                     // Use key with resetKey and target index to force a fresh PinEntryScreen when switching
                     key(resetKey.value, targetAppIndex.value, selectedAuthType.value) {
                         CredentialEntryScreen(
                             authType = selectedAuthType.value ?: "PIN",
                             forAppName = appName,
+                            appPackageName = appPackageName,
                             forbiddenCredential = if (targetAppIndex.value == 2) firstAppCredential.value else null,
                             appIndex = targetAppIndex.value,
                             app1PinLength = app1PinLength.value,
@@ -655,17 +663,28 @@ fun AuthenticationTypeSelection(
         }
 
         // Note section
-        Text(
-            text = "💡 Note: You can add biometric unlock after this setup",
-            fontSize = 12.sp,
-            color = Color(0xFF7DB8DE),
-            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-            lineHeight = 16.sp,
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp, vertical = 12.dp),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-        )
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.bulb),
+                contentDescription = "Note",
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = "Note: You can add biometric unlock after this setup",
+                fontSize = 12.sp,
+                color = Color(0xFF7DB8DE),
+                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                lineHeight = 16.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        }
     }
 }
 
@@ -733,6 +752,7 @@ fun AuthenticationTypeSelectionCard(
 fun CredentialEntryScreen(
     authType: String = "PIN",
     forAppName: String = "App",
+    appPackageName: String? = null,
     forbiddenCredential: String? = null,
     appIndex: Int = 1,
     app1PinLength: Int = 0,
@@ -759,6 +779,16 @@ fun CredentialEntryScreen(
 
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val setupAppIcon = remember(appPackageName) {
+        try {
+            appPackageName?.let { pkg ->
+                context.packageManager.getApplicationIcon(pkg).toBitmap().asImageBitmap()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     val currentState = if (step.value == 0) firstInput else confirmInput
     val currentValue = currentState.value
@@ -832,6 +862,26 @@ fun CredentialEntryScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Crossfade(
+            targetState = setupAppIcon,
+            animationSpec = tween(300),
+            label = "SetupAppIconFade"
+        ) { icon ->
+            if (icon != null) {
+                Image(
+                    bitmap = icon,
+                    contentDescription = "$forAppName icon",
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(1.dp, Color(0x334A77B6), RoundedCornerShape(16.dp))
+                )
+            } else {
+                Spacer(modifier = Modifier.size(72.dp))
+            }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+
         // Title & step text
         Text(
             text = if (step.value == 0) {
@@ -891,8 +941,7 @@ fun CredentialEntryScreen(
                     advanceWithValue(drawnPattern)
                 },
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(380.dp)
+                    .size(280.dp)
             )
             Text(
                 text = "Draw pattern with at least 4 dots",

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Card
@@ -27,6 +28,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,6 +40,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -113,7 +119,13 @@ fun ChangePasswordScreen(
         }
     }
     val isPatternMode = selectedLockType.equals("PATTERN", ignoreCase = true)
-    val credentialLabel = if (isPatternMode) "Pattern" else "PIN"
+    val isPasswordMode = selectedLockType.equals("PASSWORD", ignoreCase = true)
+    val isPinMode = !isPatternMode && !isPasswordMode
+    val credentialLabel = when {
+        isPatternMode -> "Pattern"
+        isPasswordMode -> "Password"
+        else -> "PIN"
+    }
 
     val appName = remember {
         try {
@@ -162,8 +174,10 @@ fun ChangePasswordScreen(
                 Text(
                     text = when {
                         isBackupRegistration && isPatternMode -> "Set Backup Pattern"
-                        isBackupRegistration -> "Set Backup Password"
+                        isBackupRegistration && isPasswordMode -> "Set Backup Password"
+                        isBackupRegistration -> "Set Backup PIN"
                         isPatternMode -> "Change Pattern"
+                        isPasswordMode -> "Change Password"
                         else -> "Change Password"
                     },
                     fontSize = 20.sp,
@@ -179,7 +193,7 @@ fun ChangePasswordScreen(
                     .fillMaxSize()
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                verticalArrangement = Arrangement.Top
             ) {
                 Text(
                     text = when (step) {
@@ -203,8 +217,18 @@ fun ChangePasswordScreen(
                 Spacer(modifier = Modifier.height(32.dp))
 
                 fun processCredentialAttempt(attempt: String) {
-                    if (attempt.length < 4) {
-                        errorMessage = if (isPatternMode) "Pattern must connect at least 4 dots" else "PIN must be 4 digits"
+                    val minLength = when {
+                        isPatternMode -> 4
+                        isPasswordMode -> 6
+                        else -> 4
+                    }
+
+                    if (attempt.length < minLength) {
+                        errorMessage = when {
+                            isPatternMode -> "Pattern must connect at least 4 dots"
+                            isPasswordMode -> "Password must be at least 6 characters"
+                            else -> "PIN must be 4 digits"
+                        }
                         return
                     }
 
@@ -221,7 +245,11 @@ fun ChangePasswordScreen(
                                 currentPin = attempt
                                 step = 2
                             } else {
-                                errorMessage = if (isPatternMode) "Incorrect pattern" else "Incorrect PIN"
+                                errorMessage = when {
+                                    isPatternMode -> "Incorrect pattern"
+                                    isPasswordMode -> "Incorrect password"
+                                    else -> "Incorrect PIN"
+                                }
                                 currentPin = ""
                             }
                         }
@@ -250,15 +278,19 @@ fun ChangePasswordScreen(
 
                             when {
                                 isOldPin -> {
-                                    errorMessage = if (isPatternMode) "Same as old pattern" else "Same as old pin"
+                                    errorMessage = when {
+                                        isPatternMode -> "Same as old pattern"
+                                        isPasswordMode -> "Same as old password"
+                                        else -> "Same as old PIN"
+                                    }
                                     newPin = ""
                                 }
 
                                 isOtherAppPin -> {
-                                    errorMessage = if (isPatternMode) {
-                                        "Same as $otherAppName pattern"
-                                    } else {
-                                        "Same as $otherAppName pin"
+                                    errorMessage = when {
+                                        isPatternMode -> "Same as $otherAppName pattern"
+                                        isPasswordMode -> "Same as $otherAppName password"
+                                        else -> "Same as $otherAppName PIN"
                                     }
                                     newPin = ""
                                 }
@@ -292,16 +324,22 @@ fun ChangePasswordScreen(
                                         activity,
                                         when {
                                             isBackupRegistration && isPatternMode -> "Backup pattern set successfully"
-                                            isBackupRegistration -> "Backup password set successfully"
+                                            isBackupRegistration && isPasswordMode -> "Backup password set successfully"
+                                            isBackupRegistration -> "Backup PIN set successfully"
                                             isPatternMode -> "Pattern changed successfully"
-                                            else -> "Password changed successfully"
+                                            isPasswordMode -> "Password changed successfully"
+                                            else -> "PIN changed successfully"
                                         },
                                         Toast.LENGTH_SHORT
                                     ).show()
                                     activity.finish()
                                 }
                             } else {
-                                errorMessage = if (isPatternMode) "Patterns don't match" else "PINs don't match"
+                                errorMessage = when {
+                                    isPatternMode -> "Patterns don't match"
+                                    isPasswordMode -> "Passwords don't match"
+                                    else -> "PINs don't match"
+                                }
                                 confirmPin = ""
                             }
                         }
@@ -325,13 +363,46 @@ fun ChangePasswordScreen(
                         modifier = Modifier.padding(top = 12.dp)
                     )
                 } else {
-                    PinDisplay(
-                        pin = when (step) {
-                            1 -> currentPin
-                            2 -> newPin
-                            else -> confirmPin
-                        }
-                    )
+                    if (isPinMode) {
+                        PinDisplay(
+                            pin = when (step) {
+                                1 -> currentPin
+                                2 -> newPin
+                                else -> confirmPin
+                            }
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = when (step) {
+                                1 -> currentPin
+                                2 -> newPin
+                                else -> confirmPin
+                            },
+                            onValueChange = { value ->
+                                val trimmed = value.take(32)
+                                when (step) {
+                                    1 -> currentPin = trimmed
+                                    2 -> newPin = trimmed
+                                    else -> confirmPin = trimmed
+                                }
+                                errorMessage = ""
+                            },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Password,
+                                imeAction = ImeAction.Done
+                            ),
+                            label = { Text("Enter $credentialLabel") },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Purple80,
+                                unfocusedBorderColor = Color.Gray,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -348,7 +419,7 @@ fun ChangePasswordScreen(
 
                 Spacer(modifier = Modifier.height(32.dp))
 
-                if (!isPatternMode) {
+                if (isPinMode) {
                     NumberPad(
                         onNumberClick = { number ->
                             when (step) {
@@ -389,6 +460,27 @@ fun ChangePasswordScreen(
                             errorMessage = ""
                         }
                     )
+                } else if (isPasswordMode) {
+                    Button(
+                        onClick = {
+                            val attempt = when (step) {
+                                1 -> currentPin
+                                2 -> newPin
+                                else -> confirmPin
+                            }
+                            processCredentialAttempt(attempt)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0f3460))
+                    ) {
+                        Text(
+                            text = if (step < 3) "Continue" else "Confirm",
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
         }

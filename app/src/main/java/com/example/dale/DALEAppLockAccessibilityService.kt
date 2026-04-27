@@ -91,11 +91,57 @@ class DALEAppLockAccessibilityService : AccessibilityService() {
              Log.d(TAG, "Accessibility service created")
              Log.d("AppDetection", "✅ ACCESSIBILITY_SERVICE_CREATED - Ready to monitor app events")
              Log.d("AppDetection", "🎯 Watching for app opens/closes...")
+             autoOpenTrackedAppAfterServiceCreated()
          } catch (e: Exception) {
              Log.e(TAG, "Error in onCreate", e)
              Log.e("AppDetection", "❌ ERROR_IN_ACCESSIBILITY_SERVICE_CREATION: ${e.message}")
          }
      }
+
+    private fun autoOpenTrackedAppAfterServiceCreated() {
+        try {
+            val sharedPrefs = SharedPreferencesManager.getInstance(applicationContext)
+            val packageToOpen = sharedPrefs.getLastOpenedAppPackage()
+
+            // If there is no tracked app, open DALE home screen.
+            if (packageToOpen.isNullOrBlank()) {
+                val daleIntent = Intent(applicationContext, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                }
+                startActivity(daleIntent)
+                Log.d("AppDetection", "🚀 AUTO_OPEN_TRIGGERED_AFTER_SERVICE_CREATED: DALE_HOME")
+                return
+            }
+
+            // If the tracked package is DALE, explicitly open DALE home screen.
+            if (packageToOpen == packageName) {
+                val daleIntent = Intent(applicationContext, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                }
+                startActivity(daleIntent)
+                Log.d("AppDetection", "🚀 AUTO_OPEN_TRIGGERED_AFTER_SERVICE_CREATED: DALE_HOME")
+                return
+            }
+
+            val launchIntent = packageManager.getLaunchIntentForPackage(packageToOpen)
+            if (launchIntent == null) {
+                Log.d("AppDetection", "ℹ️ AUTO_OPEN_SKIPPED - No launch intent for $packageToOpen")
+                return
+            }
+
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+            startActivity(launchIntent)
+            Log.d("AppDetection", "🚀 AUTO_OPEN_TRIGGERED_AFTER_SERVICE_CREATED: $packageToOpen")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to auto-open app after service creation", e)
+            Log.e("AppDetection", "❌ AUTO_OPEN_ERROR_AFTER_SERVICE_CREATED: ${e.message}")
+        }
+    }
 
     override fun onServiceConnected() {
          super.onServiceConnected()

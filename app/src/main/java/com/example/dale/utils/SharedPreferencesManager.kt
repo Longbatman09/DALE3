@@ -238,6 +238,14 @@ class SharedPreferencesManager private constructor(context: Context) {
     fun setIntroShown(shown: Boolean) {
         sharedPreferences.edit().putBoolean(KEY_INTRO_SHOWN, shown).apply()
     }
+
+    fun getLastSplashVideoTime(): Long {
+        return sharedPreferences.getLong(KEY_LAST_SPLASH_VIDEO_TIME, 0L)
+    }
+
+    fun setLastSplashVideoTime(timeInMillis: Long) {
+        sharedPreferences.edit().putLong(KEY_LAST_SPLASH_VIDEO_TIME, timeInMillis).apply()
+    }
     
      /**
       * Get trigger excluded apps (apps that won't trigger lock on other apps)
@@ -320,6 +328,7 @@ class SharedPreferencesManager private constructor(context: Context) {
         private const val KEY_SETUP_COMPLETED = "setup_completed"
         private const val KEY_PROTECTION_ENABLED = "protection_enabled"
         private const val KEY_INTRO_SHOWN = "intro_shown"
+        private const val KEY_LAST_SPLASH_VIDEO_TIME = "last_splash_video_time"
 
         @Volatile
         private var instance: SharedPreferencesManager? = null
